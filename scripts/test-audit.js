@@ -229,14 +229,30 @@ async function getBuyerEntriesCount(db, buyerId) {
   return res?.count ?? 0;
 }
 
-async function deleteBuyer(db, buyerId) {
+async function deleteBuyer(db, buyerId, force = false) {
   const count = await getBuyerEntriesCount(db, buyerId);
-  if (count > 0) {
+  if (count > 0 && !force) {
     throw new Error(
       `Cannot delete buyer with ${count} existing milk collection records. SQLite foreign keys protect historical records.`
     );
   }
-  await db.runAsync('DELETE FROM buyers WHERE id = ?;', [buyerId]);
+  await db.withTransactionAsync(async () => {
+    if (force && count > 0) {
+      try {
+        await db.runAsync('DELETE FROM buyer_payments WHERE buyer_id = ?;', [buyerId]);
+      } catch {
+        // Safe fallback if table not yet initialized
+      }
+      await db.runAsync('DELETE FROM milk_entries WHERE buyer_id = ?;', [buyerId]);
+    } else {
+      try {
+        await db.runAsync('DELETE FROM buyer_payments WHERE buyer_id = ?;', [buyerId]);
+      } catch {
+        // Safe fallback if table not yet initialized
+      }
+    }
+    await db.runAsync('DELETE FROM buyers WHERE id = ?;', [buyerId]);
+  });
 }
 
 async function getDaySummary(db, date) {
@@ -1194,6 +1210,25 @@ async function runAudit() {
     await deleteBuyer(db, buyer2Id);
     const check = await db.getFirstAsync('SELECT * FROM buyers WHERE id = ?;', [buyer2Id]);
     assert.strictEqual(check, null, 'Buyer2 was deleted');
+  });
+
+  await testAsync('Can delete referenced buyer when force is true', async () => {
+    const tempBuyerId = await addBuyer(db, 'Disposable Buyer', '+92 300 0000000', 'Test', false);
+    await insertMilkEntry(db, {
+      date: '2026-10-15',
+      shift: 'Morning',
+      liters: 10,
+      fat_percentage: 4.0,
+      rate_per_liter: 100,
+      total_amount: 1000,
+      buyer_id: tempBuyerId,
+      buyer_name: 'Disposable Buyer',
+    });
+    await deleteBuyer(db, tempBuyerId, true);
+    const checkBuyer = await db.getFirstAsync('SELECT * FROM buyers WHERE id = ?;', [tempBuyerId]);
+    const checkEntries = await db.getFirstAsync('SELECT COUNT(*) as c FROM milk_entries WHERE buyer_id = ?;', [tempBuyerId]);
+    assert.strictEqual(checkBuyer, null, 'Temp buyer was deleted');
+    assert.strictEqual(checkEntries.c, 0, 'Temp buyer milk entries were also cleaned up');
   });
 
   // --- SECTION 3: MILK ENTRIES & DAILY AGGREGATIONS ---

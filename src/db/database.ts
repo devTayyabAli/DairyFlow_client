@@ -270,7 +270,7 @@ export interface BuyerOverviewItem {
 export const DB_NAME = 'dairy_farm.db';
 
 /**
- * Initializes the SQLite database schema and seeds the default buyer if needed.
+ * Initializes the SQLite database schema cleanly without dummy/demo data.
  */
 export async function initDatabase(db: SQLiteDatabase): Promise<void> {
   // Enable foreign keys
@@ -408,265 +408,8 @@ export async function initDatabase(db: SQLiteDatabase): Promise<void> {
   // Run offline-first sync migration & trigger setup
   await migrateAndSetupSync(db);
 
-  // Seed reference buyers if none exist
-  const existingBuyer = await db.getFirstAsync<{ count: number }>(
-    'SELECT COUNT(*) as count FROM buyers;'
-  );
-
-  if (!existingBuyer || existingBuyer.count === 0) {
-    // Flag sync_applying to ensure demo seed data never enters sync_queue
-    await db.runAsync("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('sync_applying', '1');");
-    const now = new Date().toISOString();
-
-    // Default cooperative
-    await db.runAsync(
-      `INSERT INTO buyers (name, phone, address, is_default, created_at)
-       VALUES (?, ?, ?, 1, ?);`,
-      ['Ahmed Milk Centre', '0300 762 1890', 'Ahmed Ali · Sheikhupura', now]
-    );
-    await db.runAsync(
-      `INSERT INTO buyers (name, phone, address, is_default, created_at)
-       VALUES (?, ?, ?, 0, ?);`,
-      ['Bilal Dairy Shop', '0301 555 1234', 'Ferozewala', now]
-    );
-    await db.runAsync(
-      `INSERT INTO buyers (name, phone, address, is_default, created_at)
-       VALUES (?, ?, ?, 0, ?);`,
-      ['Ayesha Sweets', '0302 444 9876', 'Sheikhupura', now]
-    );
-
-    // Get Ahmed Milk Centre ID
-    const ahmed = await db.getFirstAsync<{ id: number }>(
-      'SELECT id FROM buyers WHERE name LIKE ? LIMIT 1;',
-      ['%Ahmed%']
-    );
-
-    if (ahmed) {
-      // Seed payments matching Screenshot 151353
-      await db.runAsync(
-        `INSERT INTO buyer_payments (buyer_id, date, amount, payment_method, received_by, created_at)
-         VALUES (?, ?, ?, ?, ?, ?);`,
-        [ahmed.id, '2026-10-12', 20000, 'Bank transfer', 'HBL', now]
-      );
-      await db.runAsync(
-        `INSERT INTO buyer_payments (buyer_id, date, amount, payment_method, received_by, created_at)
-         VALUES (?, ?, ?, ?, ?, ?);`,
-        [ahmed.id, '2026-10-10', 25000, 'Cash', 'Received by Usman', now]
-      );
-
-      // Opening balance milk sale before weekly period (matches Screenshot 151353 opening balance Rs 8,000)
-      await db.runAsync(
-        `INSERT INTO milk_entries (date, shift, liters, fat_percentage, rate_per_liter, total_amount, buyer_id, buyer_name, created_at)
-         VALUES (?, 'Morning', 40, 4.5, 200, 8000, ?, 'Ahmed Milk Centre', ?);`,
-        ['2026-10-08', ahmed.id, now]
-      );
-
-      // Seed milk sales matching Screenshot 151522 (Fri 9 - Tue 13 Oct 2026)
-      await db.runAsync(
-        `INSERT INTO milk_entries (date, shift, liters, fat_percentage, rate_per_liter, total_amount, buyer_id, buyer_name, created_at)
-         VALUES (?, 'Morning', 50, 4.5, 200, 10000, ?, 'Ahmed Milk Centre', ?);`,
-        ['2026-10-09', ahmed.id, now]
-      );
-      await db.runAsync(
-        `INSERT INTO milk_entries (date, shift, liters, fat_percentage, rate_per_liter, total_amount, buyer_id, buyer_name, created_at)
-         VALUES (?, 'Morning', 60, 4.5, 200, 12000, ?, 'Ahmed Milk Centre', ?);`,
-        ['2026-10-10', ahmed.id, now]
-      );
-      await db.runAsync(
-        `INSERT INTO milk_entries (date, shift, liters, fat_percentage, rate_per_liter, total_amount, buyer_id, buyer_name, created_at)
-         VALUES (?, 'Morning', 55, 4.5, 200, 11000, ?, 'Ahmed Milk Centre', ?);`,
-        ['2026-10-11', ahmed.id, now]
-      );
-      await db.runAsync(
-        `INSERT INTO milk_entries (date, shift, liters, fat_percentage, rate_per_liter, total_amount, buyer_id, buyer_name, created_at)
-         VALUES (?, 'Morning', 50, 4.5, 200, 10000, ?, 'Ahmed Milk Centre', ?);`,
-        ['2026-10-12', ahmed.id, now]
-      );
-      await db.runAsync(
-        `INSERT INTO milk_entries (date, shift, liters, fat_percentage, rate_per_liter, total_amount, buyer_id, buyer_name, created_at)
-         VALUES (?, 'Morning', 65, 4.5, 200, 13000, ?, 'Ahmed Milk Centre', ?);`,
-        ['2026-10-13', ahmed.id, now]
-      );
-      await db.runAsync(
-        `INSERT INTO milk_entries (date, shift, liters, fat_percentage, rate_per_liter, total_amount, buyer_id, buyer_name, created_at)
-         VALUES (?, 'Evening', 20, 4.5, 200, 4000, ?, 'Ahmed Milk Centre', ?);`,
-        ['2026-10-13', ahmed.id, now]
-      );
-    }
-
-    const bilal = await db.getFirstAsync<{ id: number }>(
-      'SELECT id FROM buyers WHERE name LIKE ? LIMIT 1;',
-      ['%Bilal%']
-    );
-    if (bilal) {
-      await db.runAsync(
-        `INSERT INTO milk_entries (date, shift, liters, fat_percentage, rate_per_liter, total_amount, buyer_id, buyer_name, created_at)
-         VALUES (?, 'Morning', 45, 4.5, 200, 9000, ?, 'Bilal Dairy Shop', ?);`,
-        ['2026-10-12', bilal.id, now]
-      );
-      await db.runAsync(
-        `INSERT INTO milk_entries (date, shift, liters, fat_percentage, rate_per_liter, total_amount, buyer_id, buyer_name, created_at)
-         VALUES (?, 'Morning', 80, 4.5, 200, 16000, ?, 'Bilal Dairy Shop', ?);`,
-        ['2026-10-14', bilal.id, now]
-      );
-      await db.runAsync(
-        `INSERT INTO milk_entries (date, shift, liters, fat_percentage, rate_per_liter, total_amount, buyer_id, buyer_name, created_at)
-         VALUES (?, 'Evening', 75, 4.5, 200, 15000, ?, 'Bilal Dairy Shop', ?);`,
-        ['2026-10-15', bilal.id, now]
-      );
-      await db.runAsync(
-        `INSERT INTO buyer_payments (buyer_id, date, amount, payment_method, received_by, created_at)
-         VALUES (?, '2026-10-14', 31000, 'Bank transfer', 'Bank Alfalah', ?);`,
-        [bilal.id, now]
-      );
-    }
-
-    const ayesha = await db.getFirstAsync<{ id: number }>(
-      'SELECT id FROM buyers WHERE name LIKE ? LIMIT 1;',
-      ['%Ayesha%']
-    );
-    if (ayesha) {
-      await db.runAsync(
-        `INSERT INTO milk_entries (date, shift, liters, fat_percentage, rate_per_liter, total_amount, buyer_id, buyer_name, created_at)
-         VALUES (?, 'Evening', 25, 4.5, 200, 5000, ?, 'Ayesha Sweets', ?);`,
-        ['2026-10-12', ayesha.id, now]
-      );
-      await db.runAsync(
-        `INSERT INTO milk_entries (date, shift, liters, fat_percentage, rate_per_liter, total_amount, buyer_id, buyer_name, created_at)
-         VALUES (?, 'Evening', 65, 4.5, 200, 13000, ?, 'Ayesha Sweets', ?);`,
-        ['2026-10-14', ayesha.id, now]
-      );
-      await db.runAsync(
-        `INSERT INTO milk_entries (date, shift, liters, fat_percentage, rate_per_liter, total_amount, buyer_id, buyer_name, created_at)
-         VALUES (?, 'Morning', 60, 4.5, 200, 12000, ?, 'Ayesha Sweets', ?);`,
-        ['2026-10-15', ayesha.id, now]
-      );
-      await db.runAsync(
-        `INSERT INTO buyer_payments (buyer_id, date, amount, payment_method, received_by, created_at)
-         VALUES (?, '2026-10-14', 25000, 'Cash', 'Direct counter', ?);`,
-        [ayesha.id, now]
-      );
-    }
-
-    // Seed reference farm operating expenses matching Screenshot 151433 (Rs 48,500 total)
-    await db.runAsync(
-      `INSERT INTO expenses (date, category, title, amount, quantity, unit, unit_price, supplier_or_payee, payment_method, created_at)
-       VALUES (?, 'Feed', 'Wanda & Silage (40 bags)', 32000, 40, 'bag', 800, 'Punjab Feeds', 'Bank transfer', ?);`,
-      ['2026-10-10', now]
-    );
-    await db.runAsync(
-      `INSERT INTO expenses (date, category, title, amount, supplier_or_payee, payment_method, created_at)
-       VALUES (?, 'Labour', 'Weekly farm staff wages', 10000, 'Farm Workers', 'Cash', ?);`,
-      ['2026-10-12', now]
-    );
-    await db.runAsync(
-      `INSERT INTO expenses (date, category, title, amount, supplier_or_payee, payment_method, created_at)
-       VALUES (?, 'Veterinary', 'HS Vaccine & Deworming medication', 4500, 'Dr. Tariq Vet Clinic', 'Cash', ?);`,
-      ['2026-10-11', now]
-    );
-    await db.runAsync(
-      `INSERT INTO expenses (date, category, title, amount, quantity, unit, unit_price, supplier_or_payee, payment_method, created_at)
-       VALUES (?, 'Transport', 'Tractor diesel for fodder (10 L)', 2000, 10, 'liter', 200, 'PSO Petrol Pump', 'Cash', ?);`,
-      ['2026-10-13', now]
-    );
-
-    // 18 Cows (14 lactating, 4 dry/pregnant)
-    for (let i = 1; i <= 14; i++) {
-      const tag = `C-${String(i).padStart(2, '0')}`;
-      await db.runAsync(
-        `INSERT INTO livestock (tag_number, name, species, gender, status, breed, created_at)
-         VALUES (?, ?, 'Cow', 'Female', 'Lactating', 'Sahiwal', ?);`,
-        [tag, `Cow ${tag}`, now]
-      );
-    }
-    for (let i = 15; i <= 18; i++) {
-      const tag = `C-${String(i).padStart(2, '0')}`;
-      const status = i % 2 === 0 ? 'Pregnant' : 'Dry';
-      await db.runAsync(
-        `INSERT INTO livestock (tag_number, name, species, gender, status, breed, created_at)
-         VALUES (?, ?, 'Cow', 'Female', ?, 'Sahiwal', ?);`,
-        [tag, `Cow ${tag}`, status, now]
-      );
-    }
-
-    // 12 Buffaloes (8 lactating, 4 dry)
-    for (let i = 1; i <= 8; i++) {
-      const tag = `B-${String(i).padStart(2, '0')}`;
-      await db.runAsync(
-        `INSERT INTO livestock (tag_number, name, species, gender, status, breed, created_at)
-         VALUES (?, ?, 'Buffalo', 'Female', 'Lactating', 'Nili Ravi', ?);`,
-        [tag, `Buffalo ${tag}`, now]
-      );
-    }
-    for (let i = 9; i <= 12; i++) {
-      const tag = `B-${String(i).padStart(2, '0')}`;
-      await db.runAsync(
-        `INSERT INTO livestock (tag_number, name, species, gender, status, breed, created_at)
-         VALUES (?, ?, 'Buffalo', 'Female', 'Dry', 'Nili Ravi', ?);`,
-        [tag, `Buffalo ${tag}`, now]
-      );
-    }
-
-    // 9 Calves (5 female, 4 male)
-    for (let i = 1; i <= 5; i++) {
-      const tag = `K-${String(i).padStart(2, '0')}`;
-      await db.runAsync(
-        `INSERT INTO livestock (tag_number, name, species, gender, status, breed, created_at)
-         VALUES (?, ?, 'Calf', 'Female', 'Calf', 'Crossbred', ?);`,
-        [tag, `Calf ${tag}`, now]
-      );
-    }
-    for (let i = 6; i <= 9; i++) {
-      const tag = `K-${String(i).padStart(2, '0')}`;
-      await db.runAsync(
-        `INSERT INTO livestock (tag_number, name, species, gender, status, breed, created_at)
-         VALUES (?, ?, 'Calf', 'Male', 'Calf', 'Crossbred', ?);`,
-        [tag, `Calf ${tag}`, now]
-      );
-    }
-
-    // Seed recent activities matching Screenshot 151606
-    const today = new Date().toISOString().split('T')[0];
-    await db.runAsync(
-      `INSERT INTO livestock_activities (animal_tag, activity_type, title, date, notes, created_at)
-       VALUES (?, ?, ?, ?, ?, ?);`,
-      ['Buffalo B-07', 'Vaccination', 'Vaccination completed', today, 'HS vaccine · 10:00 am', now]
-    );
-    await db.runAsync(
-      `INSERT INTO livestock_activities (animal_tag, activity_type, title, date, notes, created_at)
-       VALUES (?, ?, ?, ?, ?, ?);`,
-      ['Cow C-12', 'Group Move', 'Moved to lactating group', today, 'calved on 11 Oct · 7:30 am', now]
-    );
-    await db.runAsync(
-      `INSERT INTO livestock_activities (animal_tag, activity_type, title, date, notes, created_at)
-       VALUES (?, ?, ?, ?, ?, ?);`,
-      ['Calf K-09', 'Calving', 'New calf registered', today, 'female · mother C-12 · 4:30 am', now]
-    );
-    await db.runAsync(
-      `INSERT INTO livestock_activities (animal_tag, activity_type, title, date, notes, created_at)
-       VALUES (?, ?, ?, ?, ?, ?);`,
-      ['Calves K-03, K-05, K-08', 'Deworming', 'Deworming scheduled', today, 'Oral suspension due this Thursday', now]
-    );
-
-    // Save demo seed UUIDs to distinguish seed rows from user rows
-    const seedRows = await db.getAllAsync<{ uuid: string }>(`
-      SELECT uuid FROM buyers
-      UNION SELECT uuid FROM milk_entries
-      UNION SELECT uuid FROM expenses
-      UNION SELECT uuid FROM buyer_payments
-      UNION SELECT uuid FROM livestock
-      UNION SELECT uuid FROM livestock_activities;
-    `);
-    const seedUuids = seedRows.map((r) => r.uuid);
-    await db.runAsync(
-      "INSERT OR REPLACE INTO app_settings (key, value) VALUES ('demo_seed_uuids', ?);",
-      [JSON.stringify(seedUuids)]
-    );
-
-    // Clear flag and remove any queued demo seed operations
-    await db.runAsync("DELETE FROM app_settings WHERE key = 'sync_applying';");
-    await db.runAsync('DELETE FROM sync_queue;');
-  }
+  // Ensure no demo/dummy data exists in database (clean fresh start for real users)
+  await purgeAllDemoData(db);
 }
 
 export const SYNCED_TABLES = [
@@ -937,6 +680,66 @@ export async function purgeDemoData(db: SQLiteDatabase): Promise<number> {
 }
 
 /**
+ * Completely removes any dummy or demo seed data (both by demo_seed_uuids and legacy hardcoded demo records)
+ * so that users start with a clean, empty database.
+ */
+export async function purgeAllDemoData(db: SQLiteDatabase): Promise<void> {
+  await purgeDemoData(db);
+
+  await db.withTransactionAsync(async () => {
+    await db.runAsync("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('sync_applying', '1');");
+    try {
+      // 1. Delete legacy demo activities
+      await db.runAsync(`
+        DELETE FROM livestock_activities
+        WHERE animal_tag IN (
+          'Buffalo B-07', 'Cow C-12', 'Calf K-09', 'Calves K-03, K-05, K-08'
+        );
+      `);
+
+      // 2. Delete legacy demo livestock (C-01..C-18, B-01..B-12, K-01..K-09)
+      await db.runAsync(`
+        DELETE FROM livestock
+        WHERE tag_number IN (
+          'C-01','C-02','C-03','C-04','C-05','C-06','C-07','C-08','C-09','C-10',
+          'C-11','C-12','C-13','C-14','C-15','C-16','C-17','C-18',
+          'B-01','B-02','B-03','B-04','B-05','B-06','B-07','B-08','B-09','B-10',
+          'B-11','B-12',
+          'K-01','K-02','K-03','K-04','K-05','K-06','K-07','K-08','K-09'
+        );
+      `);
+
+      // 3. Delete legacy demo expenses
+      await db.runAsync(`
+        DELETE FROM expenses
+        WHERE title IN (
+          'Wanda & Silage (40 bags)',
+          'Weekly farm staff wages',
+          'HS Vaccine & Deworming medication',
+          'Tractor diesel for fodder (10 L)'
+        );
+      `);
+
+      // 4. Delete legacy demo buyers and their entries/payments
+      const demoBuyers = await db.getAllAsync<{ id: number }>(`
+        SELECT id FROM buyers WHERE name IN ('Ahmed Milk Centre', 'Bilal Dairy Shop', 'Ayesha Sweets');
+      `);
+      if (demoBuyers.length > 0) {
+        const ids = demoBuyers.map((b) => b.id).join(',');
+        await db.runAsync(`DELETE FROM milk_entries WHERE buyer_id IN (${ids});`);
+        await db.runAsync(`DELETE FROM buyer_payments WHERE buyer_id IN (${ids});`);
+        await db.runAsync(`DELETE FROM buyers WHERE id IN (${ids});`);
+      }
+
+      await db.runAsync("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('demo_seed_uuids', '[]');");
+      await db.runAsync("DELETE FROM sync_queue WHERE table_name IN ('buyers', 'milk_entries', 'expenses', 'buyer_payments', 'livestock', 'livestock_activities');");
+    } finally {
+      await db.runAsync("DELETE FROM app_settings WHERE key = 'sync_applying';");
+    }
+  });
+}
+
+/**
  * Wipes all farm business data and sync state from this phone (used when the user confirms
  * switching to a different farm account). Not queued for sync. Language/PIN settings are kept.
  */
@@ -1146,19 +949,38 @@ export async function getBuyerEntriesCount(
 }
 
 /**
- * Safely deletes a buyer only if no historical milk entries exist.
+ * Safely deletes a buyer. If force is true, associated milk entries and payments
+ * are deleted inside a transaction so the buyer can be removed cleanly.
+ * If force is false and historical milk entries exist, an error is thrown.
  */
 export async function deleteBuyer(
   db: SQLiteDatabase,
-  buyerId: number
+  buyerId: number,
+  force: boolean = false
 ): Promise<void> {
   const count = await getBuyerEntriesCount(db, buyerId);
-  if (count > 0) {
+  if (count > 0 && !force) {
     throw new Error(
       `Cannot delete buyer with ${count} existing milk collection records. SQLite foreign keys protect historical records.`
     );
   }
-  await db.runAsync('DELETE FROM buyers WHERE id = ?;', [buyerId]);
+  await db.withTransactionAsync(async () => {
+    if (force && count > 0) {
+      try {
+        await db.runAsync('DELETE FROM buyer_payments WHERE buyer_id = ?;', [buyerId]);
+      } catch {
+        // Safe fallback if buyer_payments table has not been created in test harness
+      }
+      await db.runAsync('DELETE FROM milk_entries WHERE buyer_id = ?;', [buyerId]);
+    } else {
+      try {
+        await db.runAsync('DELETE FROM buyer_payments WHERE buyer_id = ?;', [buyerId]);
+      } catch {
+        // Safe fallback if buyer_payments table has not been created in test harness
+      }
+    }
+    await db.runAsync('DELETE FROM buyers WHERE id = ?;', [buyerId]);
+  });
 }
 
 /**

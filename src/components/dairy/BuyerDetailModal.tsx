@@ -18,6 +18,7 @@ import { AppButton } from '@/components/ui/button';
 import { AppCard } from '@/components/ui/card';
 import { AppIcon, IconBubble } from '@/components/ui/icon';
 import { BorderRadius, Layout, Spacing, Typography } from '@/constants/theme';
+import { useLanguage } from '@/context/language-context';
 import { BuyerWithStats, getFilteredEntries, MilkEntry } from '@/db/database';
 import { useTheme } from '@/hooks/use-theme';
 
@@ -26,7 +27,7 @@ interface BuyerDetailModalProps {
   buyer: BuyerWithStats | null;
   onClose: () => void;
   onSetDefaultBuyer: (buyerId: number) => Promise<void>;
-  onDeleteBuyer: (buyerId: number) => Promise<void>;
+  onDeleteBuyer: (buyerId: number, force?: boolean) => Promise<void>;
 }
 
 export function BuyerDetailModal({
@@ -38,6 +39,7 @@ export function BuyerDetailModal({
 }: BuyerDetailModalProps) {
   const db = useSQLiteContext();
   const theme = useTheme();
+  const { isUrdu } = useLanguage();
 
   const [recentEntries, setRecentEntries] = useState<MilkEntry[]>([]);
   const [loadingEntries, setLoadingEntries] = useState<boolean>(false);
@@ -115,34 +117,34 @@ export function BuyerDetailModal({
     }
   };
 
-  // Handle deletion with strict foreign-key protection check
+  // Handle deletion with confirmation popup
   const handleDelete = () => {
-    if (buyer.entriesCount > 0) {
-      Alert.alert(
-        'Deletion Protected',
-        `Cannot delete "${buyer.name}". This buyer has ${buyer.entriesCount} recorded milk collection(s). To maintain accounting records and audit integrity, customers with historical transactions cannot be removed.`,
-        [{ text: 'Understood', style: 'default' }]
-      );
-      return;
-    }
+    const message =
+      buyer.entriesCount > 0
+        ? isUrdu
+          ? `کیا آپ واقعی "${buyer.name}" کو حذف کرنا چاہتے ہیں؟ اس خریدار کے تمام ${buyer.entriesCount} ریکارڈز، ادائیگیاں اور دودھ کی ترسیلات مستقل طور پر حذف ہو جائیں گی۔`
+          : `Are you sure you want to delete "${buyer.name}"? This buyer has ${buyer.entriesCount} recorded transaction(s). All associated milk collections and payments will also be permanently deleted.`
+        : isUrdu
+        ? `کیا آپ واقعی "${buyer.name}" کو حذف کرنا چاہتے ہیں؟`
+        : `Are you sure you want to delete "${buyer.name}"? This buyer will be removed permanently.`;
 
     Alert.alert(
-      'Delete Buyer',
-      `Are you sure you want to delete "${buyer.name}"? This buyer has no records and will be removed permanently.`,
+      isUrdu ? 'گاہک حذف کریں؟' : 'Delete Buyer',
+      message,
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: isUrdu ? 'منسوخ' : 'Cancel', style: 'cancel' },
         {
-          text: 'Delete',
+          text: isUrdu ? 'حذف کریں' : 'Delete',
           style: 'destructive',
           onPress: async () => {
             try {
               setIsDeleting(true);
-              await onDeleteBuyer(buyer.id);
+              await onDeleteBuyer(buyer.id, true);
               setIsDeleting(false);
               onClose();
             } catch (e: any) {
               setIsDeleting(false);
-              Alert.alert('Error', e.message || 'Failed to delete buyer.');
+              Alert.alert(isUrdu ? 'خرابی' : 'Error', e.message || 'Failed to delete buyer.');
             }
           },
         },

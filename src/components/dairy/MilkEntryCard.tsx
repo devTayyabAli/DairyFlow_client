@@ -4,6 +4,7 @@ import { Alert, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { BorderRadius, Shadows, Spacing } from '@/constants/theme';
+import { useLanguage } from '@/context/language-context';
 import { MilkEntry } from '@/db/database';
 import { useTheme } from '@/hooks/use-theme';
 
@@ -16,6 +17,7 @@ interface MilkEntryCardProps {
 
 function MilkEntryCardBase({ entry, onDelete, onEdit, currencySymbol = 'Rs' }: MilkEntryCardProps) {
   const theme = useTheme();
+  const { isUrdu } = useLanguage();
 
   const isMorning = entry.shift === 'Morning';
   const shiftBg = isMorning ? theme.morningBg : theme.eveningBg;
@@ -29,15 +31,18 @@ function MilkEntryCardBase({ entry, onDelete, onEdit, currencySymbol = 'Rs' }: M
   }, [entry.created_at]);
 
   const handleDeletePress = useCallback(() => {
+    const shiftLabel = entry.shift === 'Morning' ? (isUrdu ? 'صبح' : 'Morning') : (isUrdu ? 'شام' : 'Evening');
     Alert.alert(
-      'Delete entry',
-      `Delete this ${entry.shift} entry of ${entry.liters} L (${currencySymbol} ${entry.total_amount})?`,
+      isUrdu ? 'دودھ کا اندراج حذف کریں' : 'Delete entry',
+      isUrdu
+        ? `کیا آپ واقعی ${shiftLabel} کا ${entry.liters} لیٹر (${currencySymbol} ${entry.total_amount}) کا اندراج حذف کرنا چاہتے ہیں؟`
+        : `Delete this ${entry.shift} entry of ${entry.liters} L (${currencySymbol} ${entry.total_amount})?`,
       [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: () => onDelete(entry.id) },
+        { text: isUrdu ? 'منسوخ' : 'Cancel', style: 'cancel' },
+        { text: isUrdu ? 'حذف کریں' : 'Delete', style: 'destructive', onPress: () => onDelete(entry.id) },
       ]
     );
-  }, [currencySymbol, entry.id, entry.liters, entry.shift, entry.total_amount, onDelete]);
+  }, [currencySymbol, entry.id, entry.liters, entry.shift, entry.total_amount, isUrdu, onDelete]);
 
   return (
     <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}>

@@ -42,6 +42,7 @@ export type SemanticIconName =
   | 'edit'
   | 'home'
   | 'logout'
+  | 'trash'
   | 'alert';
 
 export interface AppIconProps {
@@ -119,6 +120,8 @@ export function AppIcon({ name, size = 20, color, style }: AppIconProps) {
         return <Feather name="home" size={size} color={iconColor} />;
       case 'logout':
         return <Ionicons name="log-out-outline" size={size} color={iconColor} />;
+      case 'trash':
+        return <Feather name="trash-2" size={size} color={iconColor} />;
       case 'alert':
         return <Ionicons name="alert-circle-outline" size={size} color={iconColor} />;
     }

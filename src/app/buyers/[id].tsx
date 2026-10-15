@@ -13,14 +13,19 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { AdminPinModal } from '@/components/dairy/AdminPinModal';
 import { RecordPaymentModal } from '@/components/dairy/RecordPaymentModal';
 import { ThemedText } from '@/components/themed-text';
 import { AppButton, AppCard, AppIcon, ShiftBadge } from '@/components/ui';
 import { BorderRadius, Layout, Spacing, Typography } from '@/constants/theme';
+import { useAdmin } from '@/context/admin-context';
 import { useLanguage } from '@/context/language-context';
 import {
   BuyerLedgerSummary,
   BuyerPayment,
+  deleteBuyer,
+  deleteBuyerPayment,
+  deleteMilkEntry,
   getBuyerLedger,
   MilkEntry,
   NewBuyerPayment,
@@ -55,7 +60,13 @@ const keyExtractor = (item: MilkEntry) => String(item.id);
 // Row components
 // ---------------------------------------------------------------------------
 
-const PaymentRow = React.memo(function PaymentRow({ payment }: { payment: BuyerPayment }) {
+const PaymentRow = React.memo(function PaymentRow({
+  payment,
+  onDelete,
+}: {
+  payment: BuyerPayment;
+  onDelete?: (payment: BuyerPayment) => void;
+}) {
   const theme = useTheme();
   const sub = payment.received_by
     ? `${payment.payment_method} · ${payment.received_by}`
@@ -75,11 +86,27 @@ const PaymentRow = React.memo(function PaymentRow({ payment }: { payment: BuyerP
       <ThemedText style={[styles.rowAmount, { color: theme.success }]}>
         Rs {payment.amount.toLocaleString()}
       </ThemedText>
+      {onDelete ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Delete payment"
+          hitSlop={8}
+          onPress={() => onDelete(payment)}
+          style={({ pressed }) => [styles.deleteMiniBtn, pressed && styles.pressed]}>
+          <AppIcon name="trash" size={16} color={theme.danger} />
+        </Pressable>
+      ) : null}
     </View>
   );
 });
 
-const MilkRow = React.memo(function MilkRow({ entry }: { entry: MilkEntry }) {
+const MilkRow = React.memo(function MilkRow({
+  entry,
+  onDelete,
+}: {
+  entry: MilkEntry;
+  onDelete?: (entry: MilkEntry) => void;
+}) {
   const theme = useTheme();
   const { isUrdu } = useLanguage();
   const detail = `${entry.fat_percentage ? `${entry.fat_percentage}% fat · ` : ''}Rs ${entry.rate_per_liter}/L`;
@@ -97,6 +124,16 @@ const MilkRow = React.memo(function MilkRow({ entry }: { entry: MilkEntry }) {
           </ThemedText>
         </View>
         <ThemedText style={styles.rowAmount}>Rs {entry.total_amount.toLocaleString()}</ThemedText>
+        {onDelete ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Delete milk entry"
+            hitSlop={8}
+            onPress={() => onDelete(entry)}
+            style={({ pressed }) => [styles.deleteMiniBtn, pressed && styles.pressed]}>
+            <AppIcon name="trash" size={16} color={theme.danger} />
+          </Pressable>
+        ) : null}
       </View>
     </AppCard>
   );
@@ -185,7 +222,132 @@ export default function BuyerLedgerScreen() {
     [db, loadLedger]
   );
 
-  const renderItem = useCallback(({ item }: { item: MilkEntry }) => <MilkRow entry={item} />, []);
+  const { hasPinSet, isAdmin, isPinModalOpen, openPinModal, closePinModal } = useAdmin();
+  const [isDeletingBuyer, setIsDeletingBuyer] = useState(false);
+
+  const executeDeleteBuyer = useCallback(async () => {
+    setIsDeletingBuyer(true);
+    try {
+      await deleteBuyer(db, buyerId, true);
+      Alert.alert(
+        isUrdu ? 'کامیابی' : 'Success',
+        isUrdu
+          ? 'گاہک اور اس کا تمام ریکارڈ کامیابی سے حذف کر دیا گیا ہے۔'
+          : 'Buyer and associated records deleted successfully.',
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              router.replace('/buyers');
+            },
+          },
+        ]
+      );
+    } catch (err: any) {
+      console.error('Failed to delete buyer:', err);
+      Alert.alert(
+        isUrdu ? 'خرابی' : 'Error',
+        err?.message || (isUrdu ? 'گاہک حذف کرنے میں ناکامی ہوئی' : 'Failed to delete buyer')
+      );
+    } finally {
+      setIsDeletingBuyer(false);
+    }
+  }, [buyerId, db, isUrdu]);
+
+  const handleDeleteBuyer = useCallback(() => {
+    if (!buyer) return;
+
+    Alert.alert(
+      isUrdu ? 'گاہک حذف کریں؟' : 'Delete Buyer?',
+      isUrdu
+        ? `کیا آپ واقعی "${buyer.name}" کو حذف کرنا چاہتے ہیں؟ اس گاہک کے تمام ریکارڈز، ادائیگیاں اور دودھ کی ترسیلات مستقل طور پر ختم ہو جائیں گی۔`
+        : `Are you sure you want to delete "${buyer.name}"? All associated milk deliveries and payment records will be permanently deleted.`,
+      [
+        {
+          text: isUrdu ? 'منسوخ' : 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: isUrdu ? 'حذف کریں' : 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            if (hasPinSet && !isAdmin) {
+              openPinModal(executeDeleteBuyer);
+            } else {
+              executeDeleteBuyer();
+            }
+          },
+        },
+      ]
+    );
+  }, [buyer, executeDeleteBuyer, hasPinSet, isAdmin, isUrdu, openPinModal]);
+
+  const handleDeletePayment = useCallback(
+    (payment: BuyerPayment) => {
+      Alert.alert(
+        isUrdu ? 'ادائیگی حذف کریں؟' : 'Delete Payment?',
+        isUrdu
+          ? `کیا آپ واقعی ${formatDay(payment.date)} کی Rs ${payment.amount.toLocaleString()} کی ادائیگی حذف کرنا چاہتے ہیں؟`
+          : `Are you sure you want to delete this payment of Rs ${payment.amount.toLocaleString()} from ${formatDay(payment.date)}?`,
+        [
+          { text: isUrdu ? 'منسوخ' : 'Cancel', style: 'cancel' },
+          {
+            text: isUrdu ? 'حذف کریں' : 'Delete',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                await deleteBuyerPayment(db, payment.id);
+                await loadLedger();
+                Alert.alert(
+                  isUrdu ? 'کامیابی' : 'Success',
+                  isUrdu ? 'ادائیگی کا ریکارڈ حذف ہو گیا ہے۔' : 'Payment record deleted successfully.'
+                );
+              } catch (err: any) {
+                Alert.alert(isUrdu ? 'خرابی' : 'Error', err?.message || 'Failed to delete payment');
+              }
+            },
+          },
+        ]
+      );
+    },
+    [db, isUrdu, loadLedger]
+  );
+
+  const handleDeleteMilkEntry = useCallback(
+    (entry: MilkEntry) => {
+      Alert.alert(
+        isUrdu ? 'اندراج حذف کریں؟' : 'Delete Milk Record?',
+        isUrdu
+          ? `کیا آپ واقعی ${formatDay(entry.date)} کا ${entry.liters} لیٹر (${entry.shift}) کا اندراج حذف کرنا چاہتے ہیں؟`
+          : `Are you sure you want to delete this ${entry.shift} entry of ${entry.liters} L (Rs ${entry.total_amount.toLocaleString()})?`,
+        [
+          { text: isUrdu ? 'منسوخ' : 'Cancel', style: 'cancel' },
+          {
+            text: isUrdu ? 'حذف کریں' : 'Delete',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                await deleteMilkEntry(db, entry.id);
+                await loadLedger();
+                Alert.alert(
+                  isUrdu ? 'کامیابی' : 'Success',
+                  isUrdu ? 'دودھ کا اندراج حذف ہو گیا ہے۔' : 'Milk entry deleted successfully.'
+                );
+              } catch (err: any) {
+                Alert.alert(isUrdu ? 'خرابی' : 'Error', err?.message || 'Failed to delete milk entry');
+              }
+            },
+          },
+        ]
+      );
+    },
+    [db, isUrdu, loadLedger]
+  );
+
+  const renderItem = useCallback(
+    ({ item }: { item: MilkEntry }) => <MilkRow entry={item} onDelete={handleDeleteMilkEntry} />,
+    [handleDeleteMilkEntry]
+  );
 
   const initials = useMemo(() => getInitials(buyer?.name ?? ''), [buyer?.name]);
   const periodText = `${formatDay(startDate).replace(',', '')} – ${formatDay(endDate, true)}`;
@@ -323,7 +485,7 @@ export default function BuyerLedgerScreen() {
       </View>
       <AppCard variant="default" padding="md" style={styles.paymentsCard}>
         {payments && payments.length > 0 ? (
-          payments.map((p) => <PaymentRow key={p.id} payment={p} />)
+          payments.map((p) => <PaymentRow key={p.id} payment={p} onDelete={handleDeletePayment} />)
         ) : (
           <ThemedText style={[styles.emptyText, { color: theme.textSecondary }]}>
             {isUrdu ? 'اس ہفتے کوئی ادائیگی نہیں' : 'No payments recorded this week.'}
@@ -350,6 +512,28 @@ export default function BuyerLedgerScreen() {
     </AppCard>
   );
 
+  const listFooter = (
+    <View style={styles.dangerZone}>
+      <AppButton
+        variant="outline"
+        title={
+          isDeletingBuyer
+            ? isUrdu
+              ? 'حذف ہو رہا ہے...'
+              : 'Deleting buyer...'
+            : isUrdu
+            ? 'گاہک کا کھاتہ حذف کریں'
+            : 'Delete Buyer Account'
+        }
+        icon={<AppIcon name="trash" size={18} color={theme.danger} />}
+        onPress={handleDeleteBuyer}
+        disabled={isDeletingBuyer}
+        style={[styles.deleteAccountBtn, { borderColor: theme.danger + '40' }]}
+        textStyle={{ color: theme.danger, fontWeight: '700' }}
+      />
+    </View>
+  );
+
   return (
     <SafeAreaView edges={['top']} style={[styles.safeArea, { backgroundColor: theme.background }]}>
       <View style={[styles.header, { backgroundColor: theme.card, borderColor: theme.border }]}>
@@ -366,6 +550,19 @@ export default function BuyerLedgerScreen() {
             {buyer?.name ?? ' '}
           </ThemedText>
         </View>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={isUrdu ? 'گاہک حذف کریں' : 'Delete buyer'}
+          onPress={handleDeleteBuyer}
+          disabled={isDeletingBuyer}
+          style={({ pressed }) => [
+            styles.deleteHeaderBtn,
+            { backgroundColor: '#FEE2E2' },
+            pressed && styles.pressed,
+            isDeletingBuyer && styles.disabled,
+          ]}>
+          <AppIcon name="trash" size={18} color={theme.danger} />
+        </Pressable>
       </View>
 
       <FlatList
@@ -374,6 +571,7 @@ export default function BuyerLedgerScreen() {
         renderItem={renderItem}
         ListHeaderComponent={listHeader}
         ListEmptyComponent={listEmpty}
+        ListFooterComponent={listFooter}
         contentContainerStyle={[styles.listContent, { paddingBottom: Layout.bottomTabInset + Spacing.xxl }]}
         showsVerticalScrollIndicator={false}
         initialNumToRender={8}
@@ -399,6 +597,7 @@ export default function BuyerLedgerScreen() {
           outstandingBalance={outstanding}
         />
       ) : null}
+      <AdminPinModal visible={isPinModalOpen} onClose={closePinModal} mode="verify" />
     </SafeAreaView>
   );
 }
@@ -503,4 +702,26 @@ const styles = StyleSheet.create({
     padding: Spacing.xl,
   },
   notFoundTitle: { ...Typography.title2, fontWeight: '700' },
+  deleteHeaderBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: BorderRadius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  deleteMiniBtn: {
+    padding: Spacing.xs,
+    marginLeft: Spacing.xs,
+    borderRadius: BorderRadius.sm,
+  },
+  dangerZone: {
+    marginTop: Spacing.xl,
+    paddingTop: Spacing.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#E2E8F0',
+  },
+  deleteAccountBtn: {
+    borderWidth: 1,
+    backgroundColor: '#FEF2F2',
+  },
 });

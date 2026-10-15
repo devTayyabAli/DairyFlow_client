@@ -1,10 +1,11 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { FlatList, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
+import { Alert, FlatList, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AddBuyerModal } from '@/components/dairy/AddBuyerModal';
+import { AdminPinModal } from '@/components/dairy/AdminPinModal';
 import { BuyerOverviewCard } from '@/components/dairy/BuyerCard';
 import { ThemedText } from '@/components/themed-text';
 import {
@@ -16,8 +17,9 @@ import {
   LanguageToggleButton,
 } from '@/components/ui';
 import { BorderRadius, Layout, Spacing, Typography } from '@/constants/theme';
+import { useAdmin } from '@/context/admin-context';
 import { useLanguage } from '@/context/language-context';
-import { addBuyer, BuyerOverviewItem, getBuyersOverview } from '@/db/database';
+import { addBuyer, BuyerOverviewItem, deleteBuyer, getBuyersOverview } from '@/db/database';
 import { useTheme } from '@/hooks/use-theme';
 
 type BuyerFilter = 'all' | 'balance' | 'settled';
@@ -117,9 +119,57 @@ export default function BuyersDirectoryScreen() {
 
   const existingBuyers = useMemo(() => buyersOverview.map((b) => b.buyer), [buyersOverview]);
 
+  const { hasPinSet, isAdmin, isPinModalOpen, openPinModal, closePinModal } = useAdmin();
+
+  const executeDeleteBuyer = useCallback(
+    async (buyerId: number) => {
+      try {
+        await deleteBuyer(db, buyerId, true);
+        await loadData();
+        Alert.alert(
+          isUrdu ? 'کامیابی' : 'Success',
+          isUrdu
+            ? 'گاہک اور اس کے تمام ریکارڈز کامیابی سے حذف کر دیے گئے ہیں۔'
+            : 'Buyer and associated records deleted successfully.'
+        );
+      } catch (err: any) {
+        Alert.alert(isUrdu ? 'خرابی' : 'Error', err?.message || 'Failed to delete buyer');
+      }
+    },
+    [db, isUrdu, loadData]
+  );
+
+  const handleDeleteBuyer = useCallback(
+    (item: BuyerOverviewItem) => {
+      Alert.alert(
+        isUrdu ? 'گاہک حذف کریں؟' : 'Delete Buyer?',
+        isUrdu
+          ? `کیا آپ واقعی "${item.buyer.name}" کو حذف کرنا چاہتے ہیں؟ اس گاہک کے تمام ریکارڈز، ادائیگیاں اور دودھ کی ترسیلات مستقل طور پر ختم ہو جائیں گی۔`
+          : `Are you sure you want to delete "${item.buyer.name}"? All associated milk deliveries and payment records will be permanently deleted.`,
+        [
+          { text: isUrdu ? 'منسوخ' : 'Cancel', style: 'cancel' },
+          {
+            text: isUrdu ? 'حذف کریں' : 'Delete',
+            style: 'destructive',
+            onPress: () => {
+              if (hasPinSet && !isAdmin) {
+                openPinModal(() => executeDeleteBuyer(item.buyer.id));
+              } else {
+                executeDeleteBuyer(item.buyer.id);
+              }
+            },
+          },
+        ]
+      );
+    },
+    [executeDeleteBuyer, hasPinSet, isAdmin, isUrdu, openPinModal]
+  );
+
   const renderItem = useCallback(
-    ({ item }: { item: BuyerOverviewItem }) => <BuyerOverviewCard item={item} onPress={openBuyer} />,
-    [openBuyer]
+    ({ item }: { item: BuyerOverviewItem }) => (
+      <BuyerOverviewCard item={item} onPress={openBuyer} onDelete={handleDeleteBuyer} />
+    ),
+    [handleDeleteBuyer, openBuyer]
   );
 
   const isFiltering = searchQuery.length > 0 || selectedFilter !== 'all';
@@ -271,6 +321,7 @@ export default function BuyersDirectoryScreen() {
         onSaveBuyer={handleAddBuyer}
         existingBuyers={existingBuyers}
       />
+      <AdminPinModal visible={isPinModalOpen} onClose={closePinModal} mode="verify" />
     </SafeAreaView>
   );
 }

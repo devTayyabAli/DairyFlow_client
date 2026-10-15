@@ -5,6 +5,7 @@ import { Alert, Pressable, StyleSheet, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { AppCard } from '@/components/ui/card';
 import { BorderRadius, Spacing, Typography } from '@/constants/theme';
+import { useLanguage } from '@/context/language-context';
 import { Expense } from '@/db/database';
 import { useTheme } from '@/hooks/use-theme';
 
@@ -22,6 +23,7 @@ function ExpenseCardBase({
   currencySymbol = 'Rs',
 }: ExpenseCardProps) {
   const theme = useTheme();
+  const { isUrdu } = useLanguage();
 
   const isFeed = expense.category === 'Feed';
 
@@ -102,18 +104,20 @@ function ExpenseCardBase({
   const handleDeletePress = useCallback(() => {
     if (!onDelete) return;
     Alert.alert(
-      'Delete Expense',
-      `Are you sure you want to delete "${expense.title}" (${currencySymbol} ${Math.round(expense.amount).toLocaleString()})?`,
+      isUrdu ? 'خرچہ حذف کریں' : 'Delete Expense',
+      isUrdu
+        ? `کیا آپ واقعی "${expense.title}" (${currencySymbol} ${Math.round(expense.amount).toLocaleString()}) کو حذف کرنا چاہتے ہیں؟`
+        : `Are you sure you want to delete "${expense.title}" (${currencySymbol} ${Math.round(expense.amount).toLocaleString()})?`,
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: isUrdu ? 'منسوخ' : 'Cancel', style: 'cancel' },
         {
-          text: 'Delete',
+          text: isUrdu ? 'حذف کریں' : 'Delete',
           style: 'destructive',
           onPress: () => onDelete(expense.id),
         },
       ]
     );
-  }, [currencySymbol, expense.amount, expense.id, expense.title, onDelete]);
+  }, [currencySymbol, expense.amount, expense.id, expense.title, isUrdu, onDelete]);
 
   return (
     <AppCard variant="default" padding="md" style={styles.cardContainer}>

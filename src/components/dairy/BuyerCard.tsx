@@ -155,9 +155,10 @@ export const BuyerCard = React.memo(BuyerCardComponent);
 interface BuyerOverviewCardProps {
   item: BuyerOverviewItem;
   onPress: (buyerId: number) => void;
+  onDelete?: (item: BuyerOverviewItem) => void;
 }
 
-function BuyerOverviewCardComponent({ item, onPress }: BuyerOverviewCardProps) {
+function BuyerOverviewCardComponent({ item, onPress, onDelete }: BuyerOverviewCardProps) {
   const theme = useTheme();
   const { isUrdu } = useLanguage();
   const { buyer } = item;
@@ -198,7 +199,21 @@ function BuyerOverviewCardComponent({ item, onPress }: BuyerOverviewCardProps) {
               </ThemedText>
             </View>
           ) : null}
-          <AppIcon name="chevronRight" size={16} color={theme.textMuted} />
+          {onDelete ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={isUrdu ? `${buyer.name} حذف کریں` : `Delete ${buyer.name}`}
+              hitSlop={10}
+              onPress={(e) => {
+                e.stopPropagation?.();
+                onDelete(item);
+              }}
+              style={({ pressed }) => [styles.deleteCardBtn, pressed && styles.pressed]}>
+              <AppIcon name="trash" size={16} color={theme.danger} />
+            </Pressable>
+          ) : (
+            <AppIcon name="chevronRight" size={16} color={theme.textMuted} />
+          )}
         </View>
 
         <View style={styles.statsRow}>
@@ -335,5 +350,9 @@ const styles = StyleSheet.create({
   progressBar: {
     height: '100%',
     borderRadius: BorderRadius.full,
+  },
+  deleteCardBtn: {
+    padding: Spacing.xs,
+    borderRadius: BorderRadius.sm,
   },
 });
