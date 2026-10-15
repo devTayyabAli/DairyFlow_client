@@ -2,29 +2,59 @@ import { NativeTabs } from 'expo-router/unstable-native-tabs';
 import { useColorScheme } from 'react-native';
 
 import { Colors } from '@/constants/theme';
+import { useLanguage } from '@/context/language-context';
 
 export default function AppTabs() {
   const scheme = useColorScheme();
-  const colors = Colors[scheme === 'unspecified' ? 'light' : scheme];
+  const colors = Colors[scheme === 'dark' ? 'dark' : 'light'];
+  const { t } = useLanguage();
 
   return (
     <NativeTabs
-      backgroundColor={colors.background}
-      indicatorColor={colors.backgroundElement}
-      labelStyle={{ selected: { color: colors.text } }}>
+      backgroundColor={colors.card}
+      indicatorColor={colors.primaryLight}
+      iconColor={{ default: colors.textMuted, selected: colors.primary }}
+      labelStyle={{
+        default: { color: colors.textMuted },
+        selected: { color: colors.primary },
+      }}>
       <NativeTabs.Trigger name="index">
-        <NativeTabs.Trigger.Label>Home</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Label>{t('tabHome')}</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon
-          src={require('@/assets/images/tabIcons/home.png')}
-          renderingMode="template"
+          sf={{ default: 'house', selected: 'house.fill' }}
+          md="home"
         />
       </NativeTabs.Trigger>
 
       <NativeTabs.Trigger name="explore">
-        <NativeTabs.Trigger.Label>Explore</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Label>{t('tabMilk')}</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon
-          src={require('@/assets/images/tabIcons/explore.png')}
-          renderingMode="template"
+          sf={{ default: 'drop', selected: 'drop.fill' }}
+          md="water_drop"
+        />
+      </NativeTabs.Trigger>
+
+      <NativeTabs.Trigger name="buyers">
+        <NativeTabs.Trigger.Label>{t('tabBuyers')}</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon
+          sf={{ default: 'person.2', selected: 'person.2.fill' }}
+          md="group"
+        />
+      </NativeTabs.Trigger>
+
+      <NativeTabs.Trigger name="livestock">
+        <NativeTabs.Trigger.Label>{t('tabHerd')}</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon
+          sf={{ default: 'pawprint', selected: 'pawprint.fill' }}
+          md="pets"
+        />
+      </NativeTabs.Trigger>
+
+      <NativeTabs.Trigger name="more">
+        <NativeTabs.Trigger.Label>{t('tabMore')}</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon
+          sf={{ default: 'ellipsis.circle', selected: 'ellipsis.circle.fill' }}
+          md="more_horiz"
         />
       </NativeTabs.Trigger>
     </NativeTabs>
