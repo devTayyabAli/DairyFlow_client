@@ -717,14 +717,14 @@ export default function CloudSyncScreen() {
                   <View style={{ gap: Spacing.md }}>
                     <AppTextInput
                       label={t('farmNameLabel')}
-                      placeholder="e.g. Rehman Dairy Farm"
+                      placeholder={isUrdu ? 'مثلاً گرین ویلی ڈیری' : 'e.g. Green Valley Dairy'}
                       value={regFarmName}
                       onChangeText={setRegFarmName}
                     />
 
                     <AppTextInput
                       label={t('ownerNameLabel')}
-                      placeholder="e.g. Haji Muhammad Rehman"
+                      placeholder={isUrdu ? 'مثلاً فارم ایڈمن' : 'e.g. Farm Admin'}
                       value={regOwnerName}
                       onChangeText={setRegOwnerName}
                     />

@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { router } from 'expo-router';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -7,20 +6,14 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Text,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { ThemedText } from '@/components/themed-text';
-import {
-  AppButton,
-  AppCard,
-  AppIcon,
-  AppTextInput,
-  IconBubble,
-  LanguageToggleButton,
-} from '@/components/ui';
-import { BorderRadius, Shadows, Spacing, Typography } from '@/constants/theme';
+import { AuthHero } from './AuthHero';
+import { AppButton, AppIcon, AppTextInput } from '@/components/ui';
+import { BorderRadius, Shadows, Spacing } from '@/constants/theme';
 import { useAdmin } from '@/context/admin-context';
 import { useLanguage } from '@/context/language-context';
 import { useTheme } from '@/hooks/use-theme';
@@ -32,39 +25,42 @@ interface RegisterScreenProps {
 
 export function RegisterScreen({ onSuccess, onGoToLogin }: RegisterScreenProps) {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
   const { isUrdu } = useLanguage();
-  const { registerFarm, setAuthScreen, skipRegistration } = useAdmin();
+  const { registerFarm, setAuthScreen, isRegistered } = useAdmin();
 
-  // Form Fields
-  const [farmName, setFarmName] = useState<string>('');
-  const [ownerName, setOwnerName] = useState<string>('');
-  const [ownerPhone, setOwnerPhone] = useState<string>('');
-  const [defaultRate, setDefaultRate] = useState<string>('220');
-  const [pin, setPin] = useState<string>('');
-  const [confirmPin, setConfirmPin] = useState<string>('');
+  const tr = (en: string, ur: string) => (isUrdu ? ur : en);
+
+  // Form fields
+  const [farmName, setFarmName] = useState('');
+  const [ownerName, setOwnerName] = useState('');
+  const [ownerPhone, setOwnerPhone] = useState('');
+  const [defaultRate, setDefaultRate] = useState('220');
+  const [pin, setPin] = useState('');
+  const [confirmPin, setConfirmPin] = useState('');
 
   // UI state
-  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
-  const [errors, setErrors] = useState<{ [key: string]: string }>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const clearError = (key: string) => {
+    if (errors[key]) setErrors((prev) => ({ ...prev, [key]: '' }));
+  };
 
   const validate = (): boolean => {
-    const errs: { [key: string]: string } = {};
+    const errs: Record<string, string> = {};
 
     if (!farmName.trim()) {
-      errs.farmName = isUrdu ? 'فارم دا ناں لکھنا ضروری اے۔' : 'Farm name is required.';
+      errs.farmName = tr('Farm name is required.', 'فارم کا نام لازمی ہے۔');
     }
-
-    if (pin.trim() && pin.trim().length !== 4) {
-      errs.pin = isUrdu ? 'پن ٹھیک 4 ہندسیاں دا ہونا چاہیدا اے۔' : 'PIN must be exactly 4 digits.';
+    if (pin.trim().length !== 4) {
+      errs.pin = tr('Create a 4-digit PIN.', '4 ہندسی پن بنائیں۔');
+    } else if (pin.trim() !== confirmPin.trim()) {
+      errs.confirmPin = tr('PINs do not match.', 'دونوں پن ایک جیسے نہیں ہیں۔');
     }
-
-    if (pin.trim() && pin.trim() !== confirmPin.trim()) {
-      errs.confirmPin = isUrdu ? 'دونوں پن آپس وچ نہیں مل رہے۔' : 'PINs do not match.';
-    }
-
     const rateNum = parseFloat(defaultRate);
     if (isNaN(rateNum) || rateNum <= 0) {
-      errs.rate = isUrdu ? 'درست دودھ دا ریٹ درج کرو۔' : 'Enter a valid milk rate.';
+      errs.rate = tr('Enter a valid milk rate.', 'درست ریٹ درج کریں۔');
     }
 
     setErrors(errs);
@@ -83,99 +79,74 @@ export function RegisterScreen({ onSuccess, onGoToLogin }: RegisterScreenProps) 
         defaultMilkRate: defaultRate.trim() || '220',
         pin: pin.trim(),
       });
-
-      if (onSuccess) {
-        onSuccess();
-      }
+      onSuccess?.();
     } catch {
       Alert.alert(
-        isUrdu ? 'رجسٹریشن خرابی' : 'Registration Error',
-        isUrdu ? 'فارم رجسٹر کرن وچ مسئلہ آیا، دوبارہ کوشش کرو۔' : 'Failed to register farm. Please try again.',
-        [{ text: 'OK' }]
+        tr('Setup failed', 'سیٹ اپ نہیں ہو سکا'),
+        tr('Could not create your farm. Please try again.', 'فارم نہیں بن سکا۔ دوبارہ کوشش کریں۔')
       );
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleSkipDemo = async () => {
-    try {
-      setIsSubmitting(true);
-      await skipRegistration();
-      if (onSuccess) onSuccess();
-    } finally {
-      setIsSubmitting(false);
-    }
+  const goToLogin = () => {
+    if (onGoToLogin) onGoToLogin();
+    else setAuthScreen('login');
   };
 
+  const SectionLabel = ({ step, title }: { step: string; title: string }) => (
+    <View style={styles.sectionLabel}>
+      <View style={[styles.stepBadge, { backgroundColor: theme.primaryLight }]}>
+        <Text style={[styles.stepText, { color: theme.primaryDark }]}>{step}</Text>
+      </View>
+      <Text style={[styles.sectionTitle, { color: theme.text }]}>{title}</Text>
+    </View>
+  );
+
   return (
-    <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.background }]}>
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        {/* Top Header Bar */}
-        <View style={styles.topBar}>
-          <View style={styles.topLogoWrap}>
-            <IconBubble icon="sprout" variant="mint" size={32} iconSize={16} />
-            <ThemedText style={styles.topLogoText}>
-              {isUrdu ? 'ڈیری فلو' : 'DairyFlow'}
-            </ThemedText>
-          </View>
-          <LanguageToggleButton />
-        </View>
-
+    <View style={[styles.root, { backgroundColor: theme.background }]}>
+      <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView
-          contentContainerStyle={styles.scrollContent}
+          bounces={false}
           showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled">
-          {/* Hero Welcome Card */}
-          <View style={styles.heroSection}>
-            <View style={[styles.badgeWrap, { backgroundColor: theme.primary + '14' }]}>
-              <ThemedText style={[styles.badgeText, { color: theme.primary }]}>
-                {isUrdu ? '✨ نواں فارم سیٹ اپ' : '✨ New Farm Setup'}
-              </ThemedText>
-            </View>
-            <ThemedText style={styles.heroTitle}>
-              {isUrdu ? 'اپنا ڈیری فارم رجسٹر کرو' : 'Register Your Dairy Farm'}
-            </ThemedText>
-            <ThemedText style={[styles.heroSubtitle, { color: theme.textSecondary }]}>
-              {isUrdu
-                ? 'فارم دا ناں، بنیادی ریٹ تے پن بناؤ تا کہ ڈیٹا محفوظ رہوے۔'
-                : 'Enter your farm details, milk rate and PIN to secure your records.'}
-            </ThemedText>
-          </View>
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={{ paddingBottom: insets.bottom + Spacing.xxl }}>
+          <AuthHero
+            compact
+            title={tr('Set up your farm', 'اپنا فارم سیٹ اپ کریں')}
+            subtitle={tr(
+              'It takes less than a minute. Your data stays on this device.',
+              'صرف ایک منٹ لگے گا۔ آپ کا ڈیٹا اسی فون پر محفوظ رہے گا۔'
+            )}
+          />
 
-          {/* Form Card */}
-          <AppCard style={styles.formCard}>
-            {/* 1. Farm Details */}
-            <View style={styles.inputGroup}>
-              <ThemedText style={styles.groupHeader}>
-                {isUrdu ? '1. فارم دی معلومات' : '1. Farm Profile'}
-              </ThemedText>
-
+          <View style={[styles.sheet, { backgroundColor: theme.card, borderColor: theme.border }]}>
+            {/* Farm details */}
+            <View style={styles.group}>
+              <SectionLabel step="1" title={tr('Farm details', 'فارم کی تفصیل')} />
               <AppTextInput
-                label={isUrdu ? 'فارم دا ناں *' : 'Farm Name *'}
-                placeholder={isUrdu ? 'مثلاً الرحمان ڈیری فارم، علی کیٹل' : 'e.g. Rehman Dairy Farm'}
+                label={tr('Farm name', 'فارم کا نام')}
+                required
+                placeholder={tr('e.g. Green Valley Dairy', 'مثلاً گرین ویلی ڈیری')}
                 value={farmName}
                 onChangeText={(val) => {
                   setFarmName(val);
-                  if (errors.farmName) setErrors((prev) => ({ ...prev, farmName: '' }));
+                  clearError('farmName');
                 }}
                 error={errors.farmName}
                 leftIcon={<AppIcon name="home" size={18} color={theme.textMuted} />}
               />
-
               <AppTextInput
-                label={isUrdu ? 'مالک / ایڈمن دا ناں' : 'Owner / Admin Name'}
-                placeholder={isUrdu ? 'مثلاً چوہدری صاحب' : 'e.g. Farm Admin'}
+                label={tr('Owner name', 'مالک کا نام')}
+                placeholder={tr('Your full name', 'آپ کا پورا نام')}
                 value={ownerName}
                 onChangeText={setOwnerName}
                 leftIcon={<AppIcon name="user" size={18} color={theme.textMuted} />}
               />
-
               <AppTextInput
-                label={isUrdu ? 'موبائل فون نمبر' : 'Mobile Phone Number'}
-                placeholder={isUrdu ? '0300-1234567' : '0300-1234567'}
+                label={tr('Mobile number', 'موبائل نمبر')}
+                placeholder="03XX-XXXXXXX"
                 value={ownerPhone}
                 onChangeText={setOwnerPhone}
                 keyboardType="phone-pad"
@@ -183,63 +154,62 @@ export function RegisterScreen({ onSuccess, onGoToLogin }: RegisterScreenProps) 
               />
             </View>
 
-            {/* 2. Milk Rate */}
-            <View style={styles.inputGroup}>
-              <ThemedText style={styles.groupHeader}>
-                {isUrdu ? '2. دودھ دا ریٹ' : '2. Standard Milk Rate'}
-              </ThemedText>
+            <View style={[styles.divider, { backgroundColor: theme.border }]} />
 
+            {/* Milk rate */}
+            <View style={styles.group}>
+              <SectionLabel step="2" title={tr('Milk rate', 'دودھ کا ریٹ')} />
               <AppTextInput
-                label={isUrdu ? 'دودھ دا بنیادی ریٹ (روپے/لیٹر) *' : 'Default Milk Rate (PKR / Liter) *'}
+                label={tr('Default rate per liter', 'فی لیٹر بنیادی ریٹ')}
+                required
                 placeholder="220"
                 value={defaultRate}
                 onChangeText={(val) => {
                   setDefaultRate(val);
-                  if (errors.rate) setErrors((prev) => ({ ...prev, rate: '' }));
+                  clearError('rate');
                 }}
                 keyboardType="decimal-pad"
                 error={errors.rate}
-                unitSuffix={isUrdu ? 'روپے / L' : 'Rs / L'}
+                unitSuffix={tr('Rs / L', 'روپے / L')}
+                helperText={tr(
+                  'Pre-filled on every new milk entry. You can change it anytime.',
+                  'ہر نئے اندراج میں خود بخود لگے گا۔ بعد میں بدل سکتے ہیں۔'
+                )}
                 leftIcon={<AppIcon name="milk" size={18} color={theme.textMuted} />}
               />
-              <ThemedText style={[styles.inputHint, { color: theme.textMuted }]}>
-                {isUrdu
-                  ? 'ایہ ریٹ ہر نوی چوئی وچ خود بخود لگ جائے گا۔'
-                  : 'This rate will automatically prefill when recording daily milk.'}
-              </ThemedText>
             </View>
 
-            {/* 3. Admin Security PIN */}
-            <View style={styles.inputGroup}>
-              <ThemedText style={styles.groupHeader}>
-                {isUrdu ? '3. ایڈمن پن کوڈ (خفیہ لاگ ان)' : '3. 4-Digit Admin PIN (Security)'}
-              </ThemedText>
+            <View style={[styles.divider, { backgroundColor: theme.border }]} />
 
-              <AppTextInput
-                label={isUrdu ? '4-ہندسی ایڈمن پن (اختیاری)' : '4-Digit Admin PIN (Optional)'}
-                placeholder="****"
-                value={pin}
-                onChangeText={(val) => {
-                  const cleaned = val.replace(/[^0-9]/g, '').slice(0, 4);
-                  setPin(cleaned);
-                  if (errors.pin) setErrors((prev) => ({ ...prev, pin: '' }));
-                }}
-                keyboardType="number-pad"
-                maxLength={4}
-                secureTextEntry
-                error={errors.pin}
-                leftIcon={<AppIcon name="wallet" size={18} color={theme.textMuted} />}
-              />
-
-              {pin.length > 0 && (
+            {/* Security */}
+            <View style={styles.group}>
+              <SectionLabel step="3" title={tr('Secure your app', 'ایپ کو محفوظ کریں')} />
+              <View style={styles.pinRow}>
                 <AppTextInput
-                  label={isUrdu ? 'پن دی دوبارہ تصدیق *' : 'Confirm 4-Digit PIN *'}
-                  placeholder="****"
+                  containerStyle={styles.pinField}
+                  label={tr('4-digit PIN', '4 ہندسی پن')}
+                  required
+                  placeholder="••••"
+                  value={pin}
+                  onChangeText={(val) => {
+                    setPin(val.replace(/[^0-9]/g, '').slice(0, 4));
+                    clearError('pin');
+                  }}
+                  keyboardType="number-pad"
+                  maxLength={4}
+                  secureTextEntry
+                  error={errors.pin}
+                  leftIcon={<AppIcon name="lock" size={18} color={theme.textMuted} />}
+                />
+                <AppTextInput
+                  containerStyle={styles.pinField}
+                  label={tr('Confirm PIN', 'پن دوبارہ')}
+                  required
+                  placeholder="••••"
                   value={confirmPin}
                   onChangeText={(val) => {
-                    const cleaned = val.replace(/[^0-9]/g, '').slice(0, 4);
-                    setConfirmPin(cleaned);
-                    if (errors.confirmPin) setErrors((prev) => ({ ...prev, confirmPin: '' }));
+                    setConfirmPin(val.replace(/[^0-9]/g, '').slice(0, 4));
+                    clearError('confirmPin');
                   }}
                   keyboardType="number-pad"
                   maxLength={4}
@@ -247,172 +217,113 @@ export function RegisterScreen({ onSuccess, onGoToLogin }: RegisterScreenProps) 
                   error={errors.confirmPin}
                   leftIcon={<AppIcon name="check" size={18} color={theme.textMuted} />}
                 />
-              )}
-
-              <ThemedText style={[styles.inputHint, { color: theme.textMuted }]}>
-                {isUrdu
-                  ? 'پن لاؤ تاکہ کوئی ورکر دودھ دا ریٹ یا فارم دی سیٹنگز نہ بدل سکے۔'
-                  : 'Protects milk rates and farm settings from unauthorized worker changes.'}
-              </ThemedText>
+              </View>
+              <Text style={[styles.hint, { color: theme.textMuted }]}>
+                {tr(
+                  'You will use this PIN to sign in. Workers can still record milk without it.',
+                  'لاگ ان کے لیے یہی پن استعمال ہوگا۔ ورکر اس کے بغیر بھی دودھ درج کر سکتے ہیں۔'
+                )}
+              </Text>
             </View>
 
-            {/* Submit Button */}
-            <View style={{ marginTop: Spacing.sm }}>
-              <AppButton
-                variant="primary"
-                size="lg"
-                title={isUrdu ? 'فارم رجسٹر کرو تے داخل ہوو' : 'Register Farm & Get Started'}
-                loading={isSubmitting}
-                icon={<AppIcon name="check" size={18} color="#FFFFFF" />}
-                onPress={handleRegister}
-              />
-            </View>
+            <AppButton
+              variant="primary"
+              size="lg"
+              fullWidth
+              title={tr('Create Farm', 'فارم بنائیں')}
+              loading={isSubmitting}
+              icon={<AppIcon name="chevronRight" size={18} color="#FFFFFF" />}
+              iconPosition="right"
+              onPress={handleRegister}
+              style={styles.submit}
+            />
+          </View>
 
-            {/* Switch to Login / Skip */}
-            <View style={styles.alternateActions}>
-              <Pressable
-                onPress={() => {
-                  if (onGoToLogin) {
-                    onGoToLogin();
-                  } else {
-                    setAuthScreen('login');
-                  }
-                }}
-                style={({ pressed }) => [styles.altBtn, pressed && styles.pressed]}>
-                <ThemedText style={[styles.altBtnText, { color: theme.primary }]}>
-                  {isUrdu ? 'پہلے توں فارم بنیا ہویا اے؟ لاگ ان کرو' : 'Already have a farm? Login here'}
-                </ThemedText>
-              </Pressable>
+          {isRegistered ? (
+            <Pressable onPress={goToLogin} style={({ pressed }) => [styles.footerLink, pressed && styles.pressed]}>
+              <Text style={[styles.footerText, { color: theme.textSecondary }]}>
+                {tr('Already set up? ', 'پہلے سے فارم موجود ہے؟ ')}
+                <Text style={{ color: theme.primary, fontWeight: '700' }}>{tr('Sign in', 'لاگ ان کریں')}</Text>
+              </Text>
+            </Pressable>
+          ) : null}
 
-              <Pressable
-                onPress={() => router.push('/more/cloud-sync' as never)}
-                style={({ pressed }) => [styles.cloudRestoreBtn, { borderColor: theme.border }, pressed && styles.pressed]}>
-                <AppIcon name="sync" size={16} color={theme.primary} />
-                <ThemedText style={[styles.cloudRestoreText, { color: theme.primary }]}>
-                  {isUrdu ? 'کلاؤڈ اکاؤنٹ نال لاگ ان / بحال کرو' : 'Sign In with Cloud Account (Restore)'}
-                </ThemedText>
-              </Pressable>
-
-              <Pressable
-                onPress={handleSkipDemo}
-                style={({ pressed }) => [styles.altBtn, pressed && styles.pressed]}>
-                <ThemedText style={[styles.demoLinkText, { color: theme.textSecondary }]}>
-                  {isUrdu ? 'یا ڈیمو فارم (الرحمان ڈیری) نال اگے چلو ➔' : 'Or explore with Sample Farm ➔'}
-                </ThemedText>
-              </Pressable>
-            </View>
-          </AppCard>
+          <Text style={[styles.version, { color: theme.textMuted }]}>DairyFlow · v1.0.0</Text>
         </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
+  root: {
     flex: 1,
   },
-  topBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.sm,
-  },
-  topLogoWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.xs,
-  },
-  topLogoText: {
-    fontSize: Typography.title3.fontSize,
-    fontWeight: '700',
-  },
-  scrollContent: {
-    paddingHorizontal: Spacing.lg,
-    paddingBottom: Spacing.xxl,
-  },
-  heroSection: {
-    alignItems: 'center',
-    textAlign: 'center',
-    marginVertical: Spacing.md,
-    gap: Spacing.xs,
-  },
-  badgeWrap: {
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: BorderRadius.full,
-    marginBottom: 4,
-  },
-  badgeText: {
-    fontSize: Typography.caption.fontSize,
-    fontWeight: '700',
-    letterSpacing: 0.2,
-  },
-  heroTitle: {
-    fontSize: Typography.title1.fontSize,
-    fontWeight: '800',
-    textAlign: 'center',
-    letterSpacing: -0.3,
-  },
-  heroSubtitle: {
-    fontSize: Typography.subhead.fontSize,
-    textAlign: 'center',
-    lineHeight: 20,
-    paddingHorizontal: Spacing.md,
-  },
-  formCard: {
-    padding: Spacing.lg,
+  sheet: {
+    marginHorizontal: Spacing.lg,
+    marginTop: -28,
+    borderRadius: BorderRadius.xl,
+    borderWidth: 1,
+    padding: Spacing.xl,
     gap: Spacing.lg,
     ...Shadows.md,
   },
-  inputGroup: {
-    gap: Spacing.sm,
+  group: {
+    gap: Spacing.md,
   },
-  groupHeader: {
-    fontSize: Typography.body.fontSize,
-    fontWeight: '700',
-    color: '#15803D',
-    marginBottom: 2,
-  },
-  inputHint: {
-    fontSize: Typography.caption.fontSize,
-    marginTop: -2,
-    lineHeight: 16,
-  },
-  alternateActions: {
-    alignItems: 'center',
-    gap: Spacing.sm,
-    marginTop: Spacing.xs,
-  },
-  altBtn: {
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-  },
-  altBtnText: {
-    fontSize: Typography.subhead.fontSize,
-    fontWeight: '700',
-    textDecorationLine: 'underline',
-  },
-  cloudRestoreBtn: {
+  sectionLabel: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.xs,
-    paddingVertical: 8,
-    paddingHorizontal: Spacing.md,
-    borderRadius: BorderRadius.full,
-    borderWidth: 1,
-    marginVertical: 2,
+    gap: Spacing.sm,
   },
-  cloudRestoreText: {
-    fontSize: Typography.subhead.fontSize,
+  stepBadge: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepText: {
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  sectionTitle: {
+    fontSize: 16,
     fontWeight: '700',
   },
-  demoLinkText: {
-    fontSize: Typography.footnote.fontSize,
-    fontWeight: '600',
+  divider: {
+    height: StyleSheet.hairlineWidth,
+  },
+  pinRow: {
+    flexDirection: 'row',
+    gap: Spacing.md,
+  },
+  pinField: {
+    flex: 1,
+  },
+  hint: {
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  submit: {
+    marginTop: Spacing.xs,
+  },
+  footerLink: {
+    alignSelf: 'center',
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.lg,
+    marginTop: Spacing.md,
+  },
+  footerText: {
+    fontSize: 14,
+  },
+  version: {
+    textAlign: 'center',
+    fontSize: 11,
+    letterSpacing: 0.3,
+    marginTop: Spacing.sm,
   },
   pressed: {
-    opacity: 0.7,
+    opacity: 0.6,
   },
 });

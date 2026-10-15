@@ -160,7 +160,7 @@ export default function BackupScreen() {
     try {
       setSavingSettings(true);
       await updateFarmProfile({
-        farmName: farmName.trim() || 'Rehman Dairy Farm',
+        farmName: farmName.trim() || 'DairyFlow',
         defaultMilkRate: defaultRate.trim() || '220',
       });
       setFarmNameEdit(null);
@@ -550,7 +550,7 @@ export default function BackupScreen() {
               label={isUrdu ? 'فارم دا ناں' : 'Farm Name'}
               value={farmName}
               onChangeText={setFarmName}
-              placeholder={isUrdu ? 'الرحمان ڈیری فارم' : 'e.g. Rehman Dairy Farm'}
+              placeholder={isUrdu ? 'ڈیری فلو' : 'e.g. DairyFlow'}
             />
 
             <AppTextInput

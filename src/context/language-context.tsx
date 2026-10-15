@@ -31,7 +31,7 @@ export const translations = {
 
     // Brand & Header
     appName: 'DairyFlow',
-    defaultFarmName: 'Rehman Dairy Farm',
+    defaultFarmName: 'DairyFlow',
     milkCollectionShifts: 'Milk Collection & Shifts',
     toggleLangBtn: 'اردو',
     languageIndicator: 'English',
@@ -204,7 +204,7 @@ export const translations = {
 
     // Brand & Header
     appName: 'ڈیری فلو',
-    defaultFarmName: 'رحمان ڈیری فارم',
+    defaultFarmName: 'ڈیری فلو',
     milkCollectionShifts: 'روزانہ دودھ دا ریکارڈ تے شفٹاں',
     toggleLangBtn: 'English',
     languageIndicator: 'اردو / پنجابی',

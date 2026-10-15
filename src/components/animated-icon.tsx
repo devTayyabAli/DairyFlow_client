@@ -1,148 +1,146 @@
 import { Image } from 'expo-image';
 import * as SplashScreen from 'expo-splash-screen';
-import { useState } from 'react';
-import { Dimensions, StyleSheet, View } from 'react-native';
-import Animated, { Easing, Keyframe } from 'react-native-reanimated';
-import { scheduleOnRN } from 'react-native-worklets';
+import React, { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Animated, Easing, StyleSheet, Text, View } from 'react-native';
 
-const INITIAL_SCALE_FACTOR = Dimensions.get('screen').height / 90;
-const DURATION = 600;
+import { useAdmin } from '@/context/admin-context';
 
-export function AnimatedSplashOverlay() {
-  const [animate, setAnimate] = useState(false);
-  const [visible, setVisible] = useState(true);
+export const BRAND_DARK = '#0B3D22';
+const MIN_VISIBLE_MS = 1600;
 
-  if (!visible) return null;
+/** Static brand screen: logo, wordmark, tagline and a loader. */
+export function BrandSplash({ showLoader = true }: { showLoader?: boolean }) {
+  return (
+    <View style={styles.container}>
+      <View style={styles.center}>
+        <View style={styles.logoRing}>
+          <Image
+            source={require('@/assets/images/dairyflow-mark.png')}
+            style={styles.logo}
+            contentFit="contain"
+          />
+        </View>
+        <Text style={styles.wordmark}>DairyFlow</Text>
+        <Text style={styles.tagline}>Smart Dairy Farm Management</Text>
+      </View>
 
-  const splashKeyframe = new Keyframe({
-    0: {
-      transform: [{ scale: 1 }],
-      opacity: 1,
-    },
-    20: {
-      opacity: 1,
-    },
-    70: {
-      opacity: 0,
-      easing: Easing.elastic(0.7),
-    },
-    100: {
-      opacity: 0,
-      transform: [{ scale: 1 }],
-      easing: Easing.elastic(0.7),
-    },
-  });
-
-  const image = <Image style={styles.image} source={require('@/assets/images/expo-logo.png')} />;
-
-  return animate ? (
-    <Animated.View
-      entering={splashKeyframe.duration(DURATION).withCallback((finished) => {
-        'worklet';
-        if (finished) {
-          scheduleOnRN(setVisible, false);
-        }
-      })}
-      style={styles.splashOverlay}>
-      {image}
-    </Animated.View>
-  ) : (
-    <View
-      onLayout={() => {
-        SplashScreen.hideAsync().finally(() => {
-          setAnimate(true);
-        });
-      }}
-      style={styles.splashOverlay}>
-      {image}
+      <View style={styles.footer}>
+        {showLoader ? <ActivityIndicator size="small" color="#A7F3C5" /> : null}
+        <Text style={styles.footerText}>Loading your farm…</Text>
+      </View>
     </View>
   );
 }
 
-const keyframe = new Keyframe({
-  0: {
-    transform: [{ scale: INITIAL_SCALE_FACTOR }],
-  },
-  100: {
-    transform: [{ scale: 1 }],
-    easing: Easing.elastic(0.7),
-  },
-});
+/**
+ * Full-screen overlay shown on app launch. It replaces the native splash seamlessly
+ * (same background colour), stays for a short minimum time and until settings are loaded,
+ * then fades out to reveal the login screen.
+ */
+export function AnimatedSplashOverlay() {
+  const { isLoading } = useAdmin();
+  const [visible, setVisible] = useState(true);
+  const [minElapsed, setMinElapsed] = useState(false);
+  const opacity = useRef(new Animated.Value(1)).current;
+  const scale = useRef(new Animated.Value(0.92)).current;
 
-const logoKeyframe = new Keyframe({
-  0: {
-    transform: [{ scale: 1.3 }],
-    opacity: 0,
-  },
-  40: {
-    transform: [{ scale: 1.3 }],
-    opacity: 0,
-    easing: Easing.elastic(0.7),
-  },
-  100: {
-    opacity: 1,
-    transform: [{ scale: 1 }],
-    easing: Easing.elastic(0.7),
-  },
-});
+  useEffect(() => {
+    Animated.timing(scale, {
+      toValue: 1,
+      duration: 700,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+    const timer = setTimeout(() => setMinElapsed(true), MIN_VISIBLE_MS);
+    return () => clearTimeout(timer);
+  }, [scale]);
 
-const glowKeyframe = new Keyframe({
-  0: {
-    transform: [{ rotateZ: '0deg' }],
-  },
-  100: {
-    transform: [{ rotateZ: '7200deg' }],
-  },
-});
+  useEffect(() => {
+    if (!minElapsed || isLoading) return;
+    Animated.timing(opacity, {
+      toValue: 0,
+      duration: 350,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) setVisible(false);
+    });
+  }, [minElapsed, isLoading, opacity]);
 
-export function AnimatedIcon() {
+  if (!visible) return null;
+
   return (
-    <View style={styles.iconContainer}>
-      <Animated.View entering={glowKeyframe.duration(60 * 1000 * 4)} style={styles.glow}>
-        <Image style={styles.glow} source={require('@/assets/images/logo-glow.png')} />
+    <Animated.View
+      pointerEvents="none"
+      onLayout={() => {
+        SplashScreen.hideAsync().catch(() => {});
+      }}
+      style={[styles.overlay, { opacity }]}>
+      <Animated.View style={[styles.fill, { transform: [{ scale }] }]}>
+        <BrandSplash />
       </Animated.View>
-
-      <Animated.View entering={keyframe.duration(DURATION)} style={styles.background} />
-      <Animated.View style={styles.imageContainer} entering={logoKeyframe.duration(DURATION)}>
-        <Image style={styles.image} source={require('@/assets/images/expo-logo.png')} />
-      </Animated.View>
-    </View>
+    </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
-  imageContainer: {
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  glow: {
-    width: 201,
-    height: 201,
-    position: 'absolute',
-  },
-  iconContainer: {
-    justifyContent: 'center',
-    alignItems: 'center',
-    width: 128,
-    height: 128,
-    zIndex: 100,
-  },
-  image: {
-    width: 76,
-    height: 71,
-  },
-  background: {
-    borderRadius: 40,
-    experimental_backgroundImage: `linear-gradient(180deg, #3C9FFE, #0274DF)`,
-    width: 128,
-    height: 128,
-    position: 'absolute',
-  },
-  splashOverlay: {
+  overlay: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: '#208AEF',
+    zIndex: 1000,
+    elevation: 1000,
+    backgroundColor: BRAND_DARK,
+  },
+  fill: {
+    flex: 1,
+  },
+  container: {
+    flex: 1,
+    backgroundColor: BRAND_DARK,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 64,
+  },
+  center: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: 1000,
+  },
+  logoRing: {
+    width: 112,
+    height: 112,
+    borderRadius: 32,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 24,
+  },
+  logo: {
+    width: 76,
+    height: 76,
+  },
+  wordmark: {
+    color: '#FFFFFF',
+    fontSize: 34,
+    fontWeight: '800',
+    letterSpacing: -0.5,
+  },
+  tagline: {
+    color: '#A7D7B8',
+    fontSize: 14,
+    fontWeight: '500',
+    marginTop: 6,
+    letterSpacing: 0.3,
+  },
+  footer: {
+    alignItems: 'center',
+    gap: 10,
+  },
+  footerText: {
+    color: 'rgba(255,255,255,0.55)',
+    fontSize: 12,
+    fontWeight: '500',
+    letterSpacing: 0.4,
   },
 });

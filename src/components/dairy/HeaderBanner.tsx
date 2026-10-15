@@ -17,7 +17,7 @@ export function HeaderBanner({ selectedDate, farmName }: HeaderBannerProps) {
   const theme = useTheme();
   const { isUrdu } = useLanguage();
 
-  const displayFarmName = farmName || (isUrdu ? 'الرحمان ڈیری فارم' : 'Dairy Farm Manager');
+  const displayFarmName = farmName || (isUrdu ? 'ڈیری فلو' : 'DairyFlow');
 
   // Format date nicely e.g. "Tuesday, Oct 14"
   const formattedDate = (() => {

@@ -25,9 +25,9 @@ export default function TabLayout() {
           <AdminProvider>
             <SyncProvider>
               <AuthGate>
-                <AnimatedSplashOverlay />
                 <AppTabs />
               </AuthGate>
+              <AnimatedSplashOverlay />
             </SyncProvider>
           </AdminProvider>
         </LanguageProvider>

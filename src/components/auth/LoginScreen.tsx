@@ -1,21 +1,10 @@
 import React, { useState } from 'react';
-import {
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  View,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { ThemedText } from '@/components/themed-text';
-import {
-  AppButton,
-  AppCard,
-  AppIcon,
-  IconBubble,
-  LanguageToggleButton,
-} from '@/components/ui';
-import { BorderRadius, Shadows, Spacing, Typography } from '@/constants/theme';
+import { AuthHero } from './AuthHero';
+import { AppButton, AppIcon } from '@/components/ui';
+import { BorderRadius, Shadows, Spacing } from '@/constants/theme';
 import { useAdmin } from '@/context/admin-context';
 import { useLanguage } from '@/context/language-context';
 import { useTheme } from '@/hooks/use-theme';
@@ -25,417 +14,320 @@ interface LoginScreenProps {
   onGoToRegister?: () => void;
 }
 
+const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9'];
+
 export function LoginScreen({ onSuccess, onGoToRegister }: LoginScreenProps) {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
   const { isUrdu } = useLanguage();
-  const {
-    farmName,
-    ownerName,
-    hasPinSet,
-    loginAdmin,
-    loginWorker,
-    setAuthScreen,
-  } = useAdmin();
+  const { hasPinSet, loginAdmin, loginWorker, setAuthScreen } = useAdmin();
 
-  const [enteredPin, setEnteredPin] = useState<string>('');
-  const [errorMessage, setErrorMessage] = useState<string>('');
+  const [enteredPin, setEnteredPin] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
+  const [isChecking, setIsChecking] = useState(false);
+
+  const tr = (en: string, ur: string) => (isUrdu ? ur : en);
 
   const handleKeyPress = async (val: string) => {
-    if (enteredPin.length >= 4) return;
+    if (isChecking || enteredPin.length >= 4) return;
     const next = enteredPin + val;
     setEnteredPin(next);
     setErrorMessage('');
 
     if (next.length === 4) {
+      setIsChecking(true);
       try {
         const success = await loginAdmin(next);
         if (success) {
-          if (onSuccess) onSuccess();
+          onSuccess?.();
         } else {
-          setErrorMessage(
-            isUrdu
-              ? 'غلط پن کوڈ! دوبارہ چیک کر کے ملاؤ۔'
-              : 'Incorrect PIN! Please try again.'
-          );
+          setErrorMessage(tr('Incorrect PIN. Please try again.', 'غلط پن کوڈ۔ دوبارہ کوشش کریں۔'));
           setEnteredPin('');
         }
       } catch {
-        setErrorMessage(
-          isUrdu ? 'لاگ ان وچ خرابی آئی اے۔' : 'Login failed. Please try again.'
-        );
+        setErrorMessage(tr('Sign in failed. Please try again.', 'لاگ ان نہیں ہو سکا۔ دوبارہ کوشش کریں۔'));
         setEnteredPin('');
+      } finally {
+        setIsChecking(false);
       }
     }
   };
 
   const handleBackspace = () => {
-    if (enteredPin.length > 0) {
-      setEnteredPin((prev) => prev.slice(0, -1));
-      setErrorMessage('');
-    }
+    setEnteredPin((prev) => prev.slice(0, -1));
+    setErrorMessage('');
   };
 
-  const handleClear = () => {
-    setEnteredPin('');
-    setErrorMessage('');
+  const handleOpenDashboard = async () => {
+    await loginAdmin('');
+    onSuccess?.();
   };
 
   const handleWorkerLogin = () => {
     loginWorker();
-    if (onSuccess) onSuccess();
+    onSuccess?.();
   };
 
+  const goToRegister = () => {
+    if (onGoToRegister) onGoToRegister();
+    else setAuthScreen('register');
+  };
+
+  const renderKey = (num: string) => (
+    <Pressable
+      key={num}
+      accessibilityRole="button"
+      accessibilityLabel={num}
+      onPress={() => handleKeyPress(num)}
+      android_ripple={{ color: theme.backgroundSelected, borderless: true }}
+      style={({ pressed }) => [
+        styles.key,
+        { backgroundColor: pressed ? theme.backgroundSelected : theme.backgroundElement },
+      ]}>
+      <Text style={[styles.keyText, { color: theme.text }]}>{num}</Text>
+    </Pressable>
+  );
+
   return (
-    <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.background }]}>
-      {/* Top Header */}
-      <View style={styles.topBar}>
-        <View style={styles.topLogoWrap}>
-          <IconBubble icon="sprout" variant="mint" size={32} iconSize={16} />
-          <ThemedText style={styles.topLogoText}>
-            {isUrdu ? 'ڈیری فلو لاگ ان' : 'DairyFlow Login'}
-          </ThemedText>
-        </View>
-        <LanguageToggleButton />
-      </View>
-
+    <View style={[styles.root, { backgroundColor: theme.background }]}>
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}>
-        {/* Farm Identity Card */}
-        <AppCard style={styles.farmCard}>
-          <View style={styles.farmHeaderRow}>
-            <IconBubble icon="sprout" variant="mint" size={48} iconSize={24} />
-            <View style={{ flexShrink: 1 }}>
-              <ThemedText style={styles.farmTitle} numberOfLines={1}>
-                {farmName}
-              </ThemedText>
-              <View style={styles.ownerBadgeRow}>
-                <AppIcon name="user" size={13} color={theme.primary} />
-                <ThemedText style={[styles.ownerName, { color: theme.primary }]}>
-                  {ownerName || (isUrdu ? 'فارم ایڈمن' : 'Farm Admin')}
-                </ThemedText>
-              </View>
-            </View>
-          </View>
+        bounces={false}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: insets.bottom + Spacing.xxl }}>
+        <AuthHero
+          title={tr('Welcome back', 'خوش آمدید')}
+          subtitle={
+            hasPinSet
+              ? tr('Enter your 4-digit PIN to sign in', 'لاگ ان کرنے کے لیے اپنا 4 ہندسی پن درج کریں')
+              : tr('Sign in to manage your dairy farm', 'اپنے ڈیری فارم کا انتظام کرنے کے لیے لاگ ان کریں')
+          }
+        />
 
-          <ThemedText style={[styles.loginPrompt, { color: theme.textSecondary }]}>
-            {hasPinSet
-              ? isUrdu
-                ? 'ایڈمن لاگ ان واسطے 4-ہندسی پن کوڈ ملاؤ:'
-                : 'Enter your 4-digit Admin PIN to unlock:'
-              : isUrdu
-                ? 'فارم وچ داخل ہوون واسطے بٹن دباؤ:'
-                : 'Tap to enter your farm dashboard:'}
-          </ThemedText>
-
-          {/* 4 Dots PIN Display */}
-          {hasPinSet && (
-            <View style={styles.pinIndicatorWrap}>
-              {[0, 1, 2, 3].map((idx) => {
-                const filled = enteredPin.length > idx;
-                return (
-                  <View
-                    key={idx}
-                    style={[
-                      styles.pinDot,
-                      {
-                        backgroundColor: filled
-                          ? theme.primary
-                          : theme.backgroundElement,
-                        borderColor: filled ? theme.primary : theme.border,
-                      },
-                    ]}
-                  />
-                );
-              })}
-            </View>
-          )}
-
-          {/* Error Message */}
-          {errorMessage ? (
-            <View style={[styles.errorBox, { backgroundColor: theme.danger + '14' }]}>
-              <ThemedText style={[styles.errorText, { color: theme.danger }]}>
-                {errorMessage}
-              </ThemedText>
-            </View>
-          ) : null}
-
-          {/* Numeric Keypad (if PIN is configured) */}
+        <View style={[styles.sheet, { backgroundColor: theme.card, borderColor: theme.border }]}>
           {hasPinSet ? (
-            <View style={styles.keypadContainer}>
-              <View style={styles.keypadRow}>
-                {['1', '2', '3'].map((num) => (
-                  <Pressable
-                    key={num}
-                    onPress={() => handleKeyPress(num)}
-                    style={({ pressed }) => [
-                      styles.keypadBtn,
-                      { backgroundColor: theme.card, borderColor: theme.border },
-                      pressed && styles.keypadPressed,
-                    ]}>
-                    <ThemedText style={styles.keypadNum}>{num}</ThemedText>
-                  </Pressable>
+            <>
+              <View style={styles.sheetHeader}>
+                <View style={[styles.lockBadge, { backgroundColor: theme.primaryLight }]}>
+                  <AppIcon name="lock" size={18} color={theme.primary} />
+                </View>
+                <Text style={[styles.sheetTitle, { color: theme.text }]}>
+                  {tr('Admin PIN', 'ایڈمن پن')}
+                </Text>
+              </View>
+
+              <View style={styles.dotsRow}>
+                {[0, 1, 2, 3].map((idx) => {
+                  const filled = enteredPin.length > idx;
+                  return (
+                    <View
+                      key={idx}
+                      style={[
+                        styles.dot,
+                        {
+                          backgroundColor: filled ? theme.primary : 'transparent',
+                          borderColor: errorMessage ? theme.danger : filled ? theme.primary : theme.inputBorder,
+                        },
+                      ]}
+                    />
+                  );
+                })}
+              </View>
+
+              <Text
+                style={[
+                  styles.errorText,
+                  { color: theme.danger, opacity: errorMessage ? 1 : 0 },
+                ]}>
+                {errorMessage || ' '}
+              </Text>
+
+              <View style={styles.keypad}>
+                {[0, 1, 2].map((row) => (
+                  <View key={row} style={styles.keyRow}>
+                    {KEYS.slice(row * 3, row * 3 + 3).map(renderKey)}
+                  </View>
                 ))}
-              </View>
-
-              <View style={styles.keypadRow}>
-                {['4', '5', '6'].map((num) => (
+                <View style={styles.keyRow}>
+                  <View style={styles.keySpacer} />
+                  {renderKey('0')}
                   <Pressable
-                    key={num}
-                    onPress={() => handleKeyPress(num)}
-                    style={({ pressed }) => [
-                      styles.keypadBtn,
-                      { backgroundColor: theme.card, borderColor: theme.border },
-                      pressed && styles.keypadPressed,
-                    ]}>
-                    <ThemedText style={styles.keypadNum}>{num}</ThemedText>
+                    accessibilityRole="button"
+                    accessibilityLabel={tr('Delete', 'مٹائیں')}
+                    onPress={handleBackspace}
+                    onLongPress={() => setEnteredPin('')}
+                    style={({ pressed }) => [styles.keySpacer, styles.keyAux, pressed && styles.pressed]}>
+                    <Text style={[styles.auxText, { color: theme.textSecondary }]}>⌫</Text>
                   </Pressable>
-                ))}
+                </View>
               </View>
 
-              <View style={styles.keypadRow}>
-                {['7', '8', '9'].map((num) => (
-                  <Pressable
-                    key={num}
-                    onPress={() => handleKeyPress(num)}
-                    style={({ pressed }) => [
-                      styles.keypadBtn,
-                      { backgroundColor: theme.card, borderColor: theme.border },
-                      pressed && styles.keypadPressed,
-                    ]}>
-                    <ThemedText style={styles.keypadNum}>{num}</ThemedText>
-                  </Pressable>
-                ))}
-              </View>
+              <View style={[styles.divider, { backgroundColor: theme.border }]} />
 
-              <View style={styles.keypadRow}>
-                <Pressable
-                  onPress={handleClear}
-                  style={({ pressed }) => [
-                    styles.keypadAuxBtn,
-                    pressed && styles.keypadPressed,
-                  ]}>
-                  <ThemedText style={[styles.keypadAuxText, { color: theme.textSecondary }]}>
-                    {isUrdu ? 'صاف' : 'Clear'}
-                  </ThemedText>
-                </Pressable>
-
-                <Pressable
-                  onPress={() => handleKeyPress('0')}
-                  style={({ pressed }) => [
-                    styles.keypadBtn,
-                    { backgroundColor: theme.card, borderColor: theme.border },
-                    pressed && styles.keypadPressed,
-                  ]}>
-                  <ThemedText style={styles.keypadNum}>0</ThemedText>
-                </Pressable>
-
-                <Pressable
-                  onPress={handleBackspace}
-                  style={({ pressed }) => [
-                    styles.keypadAuxBtn,
-                    pressed && styles.keypadPressed,
-                  ]}>
-                  <AppIcon name="close" size={20} color={theme.textSecondary} />
-                </Pressable>
-              </View>
-            </View>
-          ) : (
-            <View style={{ marginTop: Spacing.sm }}>
-              <AppButton
-                variant="primary"
-                size="lg"
-                title={isUrdu ? 'فارم ڈیش بورڈ وچ داخل ہوو' : 'Enter Farm Dashboard'}
-                icon={<AppIcon name="check" size={18} color="#FFFFFF" />}
-                onPress={() => {
-                  loginWorker();
-                  if (onSuccess) onSuccess();
-                }}
-              />
-            </View>
-          )}
-
-          {/* Quick Worker Mode Option */}
-          {hasPinSet && (
-            <View style={styles.workerModeWrap}>
               <AppButton
                 variant="outline"
                 size="md"
-                title={
-                  isUrdu
-                    ? 'ورکر موڈ نال چلو (بغیر پن اندراج)'
-                    : 'Continue in Worker Mode (No PIN)'
-                }
-                icon={<AppIcon name="edit" size={16} color={theme.primary} />}
+                fullWidth
+                title={tr('Continue as Worker', 'ورکر کے طور پر جاری رکھیں')}
+                icon={<AppIcon name="user" size={16} color={theme.primary} />}
                 onPress={handleWorkerLogin}
               />
-              <ThemedText style={[styles.workerModeHint, { color: theme.textMuted }]}>
-                {isUrdu
-                  ? 'ورکر صرف روزانہ دودھ درج کر سکدے نے، سیٹنگز محفوظ رہندیاں نے۔'
-                  : 'Workers can log daily milk entries while protecting financial rates.'}
-              </ThemedText>
-            </View>
+              <Text style={[styles.hint, { color: theme.textMuted }]}>
+                {tr(
+                  'Workers can record daily milk. Rates and settings stay protected.',
+                  'ورکر روزانہ دودھ درج کر سکتے ہیں۔ ریٹ اور سیٹنگز محفوظ رہتی ہیں۔'
+                )}
+              </Text>
+            </>
+          ) : (
+            <>
+              <View style={styles.sheetHeader}>
+                <View style={[styles.lockBadge, { backgroundColor: theme.primaryLight }]}>
+                  <AppIcon name="home" size={18} color={theme.primary} />
+                </View>
+                <Text style={[styles.sheetTitle, { color: theme.text }]}>
+                  {tr('Your farm is ready', 'آپ کا فارم تیار ہے')}
+                </Text>
+              </View>
+              <Text style={[styles.body, { color: theme.textSecondary }]}>
+                {tr(
+                  'For better security, set a 4-digit PIN from More → Farm Profile after signing in.',
+                  'بہتر حفاظت کے لیے لاگ ان کے بعد مزید ← فارم پروفائل سے 4 ہندسی پن لگائیں۔'
+                )}
+              </Text>
+              <AppButton
+                variant="primary"
+                size="lg"
+                fullWidth
+                title={tr('Sign In', 'لاگ ان کریں')}
+                icon={<AppIcon name="chevronRight" size={18} color="#FFFFFF" />}
+                iconPosition="right"
+                onPress={handleOpenDashboard}
+              />
+            </>
           )}
+        </View>
 
-          {/* Register New Farm Switch */}
-          <View style={styles.registerSwitchWrap}>
-            <Pressable
-              onPress={() => {
-                if (onGoToRegister) {
-                  onGoToRegister();
-                } else {
-                  setAuthScreen('register');
-                }
-              }}
-              style={({ pressed }) => [styles.regBtn, pressed && styles.keypadPressed]}>
-              <ThemedText style={[styles.regBtnText, { color: theme.primary }]}>
-                {isUrdu ? '+ نواں ڈیری فارم رجسٹر کرو' : '+ Register a Different Farm'}
-              </ThemedText>
-            </Pressable>
-          </View>
-        </AppCard>
+        <Pressable onPress={goToRegister} style={({ pressed }) => [styles.footerLink, pressed && styles.pressed]}>
+          <Text style={[styles.footerText, { color: theme.textSecondary }]}>
+            {tr('Setting up a new farm? ', 'نیا فارم بنانا ہے؟ ')}
+            <Text style={{ color: theme.primary, fontWeight: '700' }}>
+              {tr('Create farm', 'فارم بنائیں')}
+            </Text>
+          </Text>
+        </Pressable>
+
+        <Text style={[styles.version, { color: theme.textMuted }]}>DairyFlow · v1.0.0</Text>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
+  root: {
     flex: 1,
   },
-  topBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.sm,
-  },
-  topLogoWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.xs,
-  },
-  topLogoText: {
-    fontSize: Typography.title3.fontSize,
-    fontWeight: '700',
-  },
-  scrollContent: {
-    paddingHorizontal: Spacing.lg,
-    paddingBottom: Spacing.xxl,
-    justifyContent: 'center',
-  },
-  farmCard: {
-    padding: Spacing.lg,
+  sheet: {
+    marginHorizontal: Spacing.lg,
+    marginTop: -32,
+    borderRadius: BorderRadius.xl,
+    borderWidth: 1,
+    padding: Spacing.xl,
     gap: Spacing.md,
     ...Shadows.md,
-    marginTop: Spacing.sm,
   },
-  farmHeaderRow: {
+  sheetHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.md,
+    gap: Spacing.sm,
   },
-  farmTitle: {
-    fontSize: Typography.title2.fontSize,
-    fontWeight: '800',
-    letterSpacing: -0.2,
-  },
-  ownerBadgeRow: {
-    flexDirection: 'row',
+  lockBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
     alignItems: 'center',
-    gap: 4,
-    marginTop: 2,
+    justifyContent: 'center',
   },
-  ownerName: {
-    fontSize: Typography.footnote.fontSize,
+  sheetTitle: {
+    fontSize: 17,
     fontWeight: '700',
   },
-  loginPrompt: {
-    fontSize: Typography.body.fontSize,
-    fontWeight: '600',
-    marginTop: Spacing.xs,
+  body: {
+    fontSize: 14,
+    lineHeight: 21,
   },
-  pinIndicatorWrap: {
+  dotsRow: {
     flexDirection: 'row',
     justifyContent: 'center',
-    alignItems: 'center',
-    gap: 16,
-    paddingVertical: 12,
+    gap: 20,
+    marginTop: Spacing.sm,
   },
-  pinDot: {
-    width: 18,
-    height: 18,
-    borderRadius: BorderRadius.full,
-    borderWidth: 1.5,
-  },
-  errorBox: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: BorderRadius.sm,
-    alignItems: 'center',
+  dot: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    borderWidth: 2,
   },
   errorText: {
-    fontSize: Typography.subhead.fontSize,
-    fontWeight: '700',
+    textAlign: 'center',
+    fontSize: 13,
+    fontWeight: '600',
+    minHeight: 18,
   },
-  keypadContainer: {
-    gap: 10,
-    marginTop: Spacing.xs,
+  keypad: {
+    gap: 12,
   },
-  keypadRow: {
+  keyRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     gap: 12,
   },
-  keypadBtn: {
+  key: {
     flex: 1,
-    height: 56,
-    borderRadius: BorderRadius.md,
+    height: 58,
+    borderRadius: BorderRadius.lg,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    ...Shadows.subtle,
   },
-  keypadNum: {
+  keyText: {
+    fontSize: 24,
+    fontWeight: '600',
+  },
+  keySpacer: {
+    flex: 1,
+    height: 58,
+  },
+  keyAux: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  auxText: {
     fontSize: 22,
-    fontWeight: '700',
+    fontWeight: '500',
   },
-  keypadAuxBtn: {
-    flex: 1,
-    height: 56,
-    borderRadius: BorderRadius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  keypadAuxText: {
-    fontSize: Typography.subhead.fontSize,
-    fontWeight: '700',
-  },
-  keypadPressed: {
+  pressed: {
     opacity: 0.6,
   },
-  workerModeWrap: {
-    gap: 4,
-    marginTop: Spacing.sm,
-    paddingTop: Spacing.sm,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderColor: '#E3EBE5',
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    marginVertical: Spacing.xs,
   },
-  workerModeHint: {
-    fontSize: Typography.caption.fontSize,
+  hint: {
+    fontSize: 12,
+    lineHeight: 17,
     textAlign: 'center',
-    lineHeight: 16,
   },
-  registerSwitchWrap: {
-    alignItems: 'center',
-    marginTop: Spacing.xs,
+  footerLink: {
+    alignSelf: 'center',
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.lg,
+    marginTop: Spacing.md,
   },
-  regBtn: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
+  footerText: {
+    fontSize: 14,
   },
-  regBtnText: {
-    fontSize: Typography.subhead.fontSize,
-    fontWeight: '700',
+  version: {
+    textAlign: 'center',
+    fontSize: 11,
+    letterSpacing: 0.3,
   },
 });

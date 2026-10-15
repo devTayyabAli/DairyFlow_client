@@ -171,7 +171,7 @@ export function FarmProfileModal({
                       {isUrdu ? 'موجودہ فارم دا ناں' : 'Registered Farm'}
                     </ThemedText>
                     <ThemedText style={styles.heroFarmName} numberOfLines={1}>
-                      {inputFarmName || (isUrdu ? 'الرحمان ڈیری فارم' : 'Rehman Dairy Farm')}
+                      {inputFarmName || (isUrdu ? 'ڈیری فلو' : 'DairyFlow')}
                     </ThemedText>
                     <ThemedText style={styles.heroSubtext}>
                       {isUrdu
@@ -194,7 +194,7 @@ export function FarmProfileModal({
                   required
                   value={inputFarmName}
                   onChangeText={setInputFarmName}
-                  placeholder={isUrdu ? 'مثلاً الرحمان ڈیری فارم' : 'e.g. Rehman Dairy Farm'}
+                  placeholder={isUrdu ? 'مثلاً گرین ویلی ڈیری' : 'e.g. Green Valley Dairy'}
                   leftIcon={<AppIcon name="sprout" size={16} color={theme.textMuted} />}
                 />
 
@@ -202,7 +202,7 @@ export function FarmProfileModal({
                   label={isUrdu ? 'فارم مالک / ایڈمن دا ناں' : 'Farm Owner / Admin Name'}
                   value={inputOwnerName}
                   onChangeText={setInputOwnerName}
-                  placeholder={isUrdu ? 'مثلاً چوہدری صاحب' : 'e.g. Chaudhry Sahab'}
+                  placeholder={isUrdu ? 'مثلاً فارم ایڈمن' : 'e.g. Farm Admin'}
                   leftIcon={<AppIcon name="user" size={16} color={theme.textMuted} />}
                 />
 

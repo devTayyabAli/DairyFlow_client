@@ -4,6 +4,24 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { useLanguage } from '@/context/language-context';
 import { getAppSetting, setAppSetting } from '@/db/database';
 
+export const DEFAULT_FARM_NAME = 'DairyFlow';
+const DEFAULT_OWNER_EN = 'Farm Admin';
+const DEFAULT_OWNER_UR = 'فارم ایڈمن';
+
+// Sample names that older builds used as defaults; never show them to real users.
+const LEGACY_FARM_NAMES = ['Rehman Dairy Farm', 'الرحمان ڈیری فارم', 'رحمان ڈیری فارم', 'Dairy Farm Manager'];
+const LEGACY_OWNER_NAMES = ['چوہدری صاحب', 'Chaudhry Sahab'];
+
+function cleanFarmName(name: string | null | undefined): string {
+  const n = (name ?? '').trim();
+  return !n || LEGACY_FARM_NAMES.includes(n) ? DEFAULT_FARM_NAME : n;
+}
+
+function cleanOwnerName(name: string | null | undefined, isUrdu: boolean): string {
+  const n = (name ?? '').trim();
+  return !n || LEGACY_OWNER_NAMES.includes(n) ? (isUrdu ? DEFAULT_OWNER_UR : DEFAULT_OWNER_EN) : n;
+}
+
 export interface FarmProfile {
   farmName: string;
   ownerName: string;
@@ -49,8 +67,8 @@ const AdminContext = createContext<AdminContextType>({
   isRegistered: true,
   isAuthenticated: true,
   authScreen: null,
-  farmName: 'الرحمان ڈیری فارم',
-  ownerName: 'چوہدری صاحب',
+  farmName: DEFAULT_FARM_NAME,
+  ownerName: DEFAULT_OWNER_EN,
   ownerPhone: '',
   defaultMilkRate: '220',
   isLoading: true,
@@ -78,12 +96,12 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [hasPinSet, setHasPinSet] = useState<boolean>(false);
   const [currentPin, setCurrentPin] = useState<string>('');
-  const [isRegistered, setIsRegistered] = useState<boolean>(true);
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(true);
+  const [isRegistered, setIsRegistered] = useState<boolean>(false);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [authScreen, setAuthScreen] = useState<'login' | 'register' | null>(null);
 
-  const [farmName, setFarmName] = useState<string>(isUrdu ? 'الرحمان ڈیری فارم' : 'Rehman Dairy Farm');
-  const [ownerName, setOwnerName] = useState<string>(isUrdu ? 'چوہدری صاحب' : 'Farm Admin');
+  const [farmName, setFarmName] = useState<string>(DEFAULT_FARM_NAME);
+  const [ownerName, setOwnerName] = useState<string>(isUrdu ? DEFAULT_OWNER_UR : DEFAULT_OWNER_EN);
   const [ownerPhone, setOwnerPhone] = useState<string>('');
   const [defaultMilkRate, setDefaultMilkRate] = useState<string>('220');
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -105,11 +123,12 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
     try {
       const [savedPin, savedFarm, savedOwner, savedPhone, savedRate, savedRegistered] = await Promise.all([
         getAppSetting(db, 'admin_pin', ''),
-        getAppSetting(db, 'farm_name', isUrdu ? 'الرحمان ڈیری فارم' : 'Rehman Dairy Farm'),
-        getAppSetting(db, 'admin_name', isUrdu ? 'چوہدری صاحب' : 'Farm Admin'),
+        getAppSetting(db, 'farm_name', ''),
+        getAppSetting(db, 'admin_name', ''),
         getAppSetting(db, 'admin_phone', ''),
         getAppSetting(db, 'default_milk_rate', '220'),
-        getAppSetting(db, 'is_registered', '1'), // Default 1 so existing databases stay active
+        // Fresh installs start unregistered so the owner sets up the farm first.
+        getAppSetting(db, 'is_registered', '0'),
       ]);
 
       const pinExists = Boolean(savedPin && savedPin.trim().length === 4);
@@ -118,27 +137,13 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
 
       const registered = savedRegistered === '1';
       setIsRegistered(registered);
+      setIsAdmin(false);
+      setIsAuthenticated(false);
+      // Every launch starts on an auth screen: setup for new farms, login otherwise.
+      setAuthScreen(registered ? 'login' : 'register');
 
-      if (!registered) {
-        // First-time farm onboarding: prompt register screen
-        setIsAuthenticated(false);
-        setAuthScreen('register');
-        setIsAdmin(false);
-      } else if (pinExists) {
-        // Farm registered with PIN: start in worker mode or locked screen
-        // By default, farm is accessible, but sensitive admin actions require PIN
-        setIsAuthenticated(true);
-        setIsAdmin(false);
-        setAuthScreen(null);
-      } else {
-        // No PIN: fully open
-        setIsAuthenticated(true);
-        setIsAdmin(true);
-        setAuthScreen(null);
-      }
-
-      setFarmName(savedFarm || (isUrdu ? 'الرحمان ڈیری فارم' : 'Rehman Dairy Farm'));
-      setOwnerName(savedOwner || (isUrdu ? 'چوہدری صاحب' : 'Farm Admin'));
+      setFarmName(cleanFarmName(savedFarm));
+      setOwnerName(cleanOwnerName(savedOwner, isUrdu));
       setOwnerPhone(savedPhone || '');
       setDefaultMilkRate(savedRate || '220');
     } catch {
@@ -187,13 +192,13 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
     const promises: Promise<void>[] = [];
 
     if (data.farmName !== undefined) {
-      const cleanName = data.farmName.trim() || (isUrdu ? 'الرحمان ڈیری فارم' : 'Rehman Dairy Farm');
+      const cleanName = cleanFarmName(data.farmName);
       setFarmName(cleanName);
       promises.push(setAppSetting(db, 'farm_name', cleanName));
     }
 
     if (data.ownerName !== undefined) {
-      const cleanOwner = data.ownerName.trim() || (isUrdu ? 'چوہدری صاحب' : 'Farm Admin');
+      const cleanOwner = cleanOwnerName(data.ownerName, isUrdu);
       setOwnerName(cleanOwner);
       promises.push(setAppSetting(db, 'admin_name', cleanOwner));
     }
@@ -215,8 +220,8 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
 
   // Register Farm (New Farm Onboarding)
   const registerFarm = async (data: RegisterFarmPayload): Promise<void> => {
-    const cleanFarm = data.farmName.trim() || (isUrdu ? 'الرحمان ڈیری فارم' : 'Rehman Dairy Farm');
-    const cleanOwner = data.ownerName.trim() || (isUrdu ? 'چوہدری صاحب' : 'Farm Admin');
+    const cleanFarm = cleanFarmName(data.farmName);
+    const cleanOwner = cleanOwnerName(data.ownerName, isUrdu);
     const cleanPhone = data.ownerPhone.trim();
     const cleanRate = data.defaultMilkRate.trim() || '220';
     const cleanPin = data.pin.trim();
@@ -281,11 +286,9 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
   };
 
   const logoutAdmin = () => {
-    if (hasPinSet) {
-      setIsAdmin(false);
-      setIsAuthenticated(false);
-      setAuthScreen('login');
-    }
+    setIsAdmin(false);
+    setIsAuthenticated(false);
+    setAuthScreen('login');
   };
 
   const skipRegistration = async () => {
