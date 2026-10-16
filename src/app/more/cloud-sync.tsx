@@ -439,7 +439,8 @@ export default function CloudSyncScreen() {
             <ThemedText style={[styles.signOutText, { color: theme.danger }]}>{t('signOutBtn')}</ThemedText>
           </Pressable>
 
-          {/* Server address */}
+          {/* Server address: developer setting, never shown to farmers in release builds */}
+          {__DEV__ ? (
           <AppCard style={styles.card}>
             <View style={styles.serverHeader}>
               <View style={styles.serverTitleRow}>
@@ -490,6 +491,7 @@ export default function CloudSyncScreen() {
               </ThemedText>
             )}
           </AppCard>
+          ) : null}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

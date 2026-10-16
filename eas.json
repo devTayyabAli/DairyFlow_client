@@ -16,14 +16,14 @@
       "distribution": "internal",
       "android": { "buildType": "apk" },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://staging-api.example.invalid"
+        "EXPO_PUBLIC_API_URL": "https://dairy-flow-server.vercel.app"
       }
     },
     "production": {
       "autoIncrement": true,
       "android": { "buildType": "app-bundle" },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://api.example.invalid"
+        "EXPO_PUBLIC_API_URL": "https://dairy-flow-server.vercel.app"
       }
     }
   },
