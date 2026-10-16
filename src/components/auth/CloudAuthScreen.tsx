@@ -46,8 +46,6 @@ export function CloudAuthScreen({ canContinueOffline = false, onContinueOffline 
     forgotPassword,
     resetPassword,
     pendingCount,
-    apiUrl,
-    updateApiUrl,
   } = useSync();
 
   const tr = (en: string, ur: string) => (isUrdu ? ur : en);
@@ -77,10 +75,6 @@ export function CloudAuthScreen({ canContinueOffline = false, onContinueOffline 
   const [otpCode, setOtpCode] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [resendIn, setResendIn] = useState(0);
-
-  // Server address (needed for physical devices / self-hosted servers)
-  const [editingServer, setEditingServer] = useState(false);
-  const [serverInput, setServerInput] = useState(apiUrl);
 
   useEffect(() => {
     if (resendIn <= 0) return;
@@ -255,15 +249,6 @@ export function CloudAuthScreen({ canContinueOffline = false, onContinueOffline 
       }
     });
 
-  const saveServer = async () => {
-    try {
-      await updateApiUrl(serverInput);
-      setEditingServer(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : tr('Could not save the server address.', 'سرور دا پتہ محفوظ نہیں ہو سکیا۔'));
-    }
-  };
-
   const heroTitle =
     mode === 'register'
       ? tr('Create your farm account', 'اپنا فارم اکاؤنٹ بنائیں')
@@ -278,9 +263,13 @@ export function CloudAuthScreen({ canContinueOffline = false, onContinueOffline 
   const heroSubtitle =
     mode === 'register'
       ? tr('Your records are backed up and available on any phone.', 'آپ کا ریکارڈ محفوظ رہے گا اور کسی بھی فون پر مل جائے گا۔')
-      : mode === 'login'
-        ? tr('Sign in with your email and password.', 'اپنی ای میل اور پاس ورڈ سے لاگ ان کریں۔')
-        : undefined;
+      : mode === 'forgot'
+        ? tr('We will email you a code to set a new password.', 'نواں پاس ورڈ بنان لئی اسیں تہانوں کوڈ بھیجاں گے۔')
+        : mode === 'otp'
+          ? otpPurpose === 'reset'
+            ? tr('Enter the code and choose a new password.', 'کوڈ درج کرو تے نواں پاس ورڈ چنو۔')
+            : tr('One last step to secure your account.', 'اکاؤنٹ محفوظ کرن دا آخری قدم۔')
+          : tr('Sign in with your email and password.', 'اپنی ای میل اور پاس ورڈ سے لاگ ان کریں۔');
 
   return (
     <View style={[styles.root, { backgroundColor: theme.background }]}>
@@ -290,7 +279,7 @@ export function CloudAuthScreen({ canContinueOffline = false, onContinueOffline 
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ paddingBottom: insets.bottom + Spacing.xxl }}>
-          <AuthHero title={heroTitle} subtitle={heroSubtitle} compact={mode !== 'login'} />
+          <AuthHero title={heroTitle} subtitle={heroSubtitle} compact={mode === 'register'} />
 
           <View style={[styles.sheet, { backgroundColor: theme.card, borderColor: theme.border }]}>
             {error ? (
@@ -535,53 +524,6 @@ export function CloudAuthScreen({ canContinueOffline = false, onContinueOffline 
             )}
           </View>
 
-          {/* Server address */}
-          <View style={styles.server}>
-            {editingServer ? (
-              <View style={styles.serverEdit}>
-                <AppTextInput
-                  label={tr('Server address', 'سرور دا پتہ')}
-                  value={serverInput}
-                  onChangeText={setServerInput}
-                  placeholder="https://api.example.com"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  keyboardType="url"
-                />
-                <View style={styles.serverButtons}>
-                  <View style={styles.serverBtn}>
-                    <AppButton
-                      title={tr('Cancel', 'منسوخ')}
-                      variant="outline"
-                      size="sm"
-                      onPress={() => {
-                        setServerInput(apiUrl);
-                        setEditingServer(false);
-                      }}
-                    />
-                  </View>
-                  <View style={styles.serverBtn}>
-                    <AppButton title={tr('Save', 'محفوظ کرو')} variant="primary" size="sm" onPress={saveServer} />
-                  </View>
-                </View>
-              </View>
-            ) : (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={tr('Change server address', 'سرور دا پتہ بدلو')}
-                onPress={() => {
-                  setServerInput(apiUrl);
-                  setEditingServer(true);
-                }}
-                style={styles.footerLink}>
-                <Text style={[styles.serverText, { color: theme.textMuted }]} numberOfLines={1}>
-                  {tr('Server: ', 'سرور: ')}
-                  {apiUrl}
-                </Text>
-              </Pressable>
-            )}
-          </View>
-
           <Text style={[styles.version, { color: theme.textMuted }]}>DairyFlow · v1.0.0</Text>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -618,10 +560,5 @@ const styles = StyleSheet.create({
   footer: { alignItems: 'center', marginTop: Spacing.md },
   footerLink: { paddingVertical: Spacing.sm, paddingHorizontal: Spacing.lg, minHeight: 44, justifyContent: 'center' },
   footerText: { fontSize: 14, textAlign: 'center' },
-  server: { marginTop: Spacing.sm, paddingHorizontal: Spacing.lg, alignItems: 'center' },
-  serverEdit: { alignSelf: 'stretch', gap: Spacing.sm },
-  serverButtons: { flexDirection: 'row', gap: Spacing.sm },
-  serverBtn: { flex: 1 },
-  serverText: { fontSize: 12 },
   version: { textAlign: 'center', fontSize: 11, letterSpacing: 0.3, marginTop: Spacing.sm },
 });

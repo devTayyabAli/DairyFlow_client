@@ -38,6 +38,13 @@ import {
   setAuthToken,
   setStoredFarmProfile,
 } from './sync-storage';
+import { logger } from '@/utils/logger';
+import {
+  describeError,
+  fetchWithTimeout,
+  networkErrorMessage,
+  serverTroubleMessage,
+} from './network-errors';
 import { retryDelayMs } from './retry-schedule';
 import { FarmProfile, SyncResult, SyncStatus } from './sync-types';
 
@@ -81,7 +88,6 @@ interface ServerError {
   retryAfterSeconds?: number;
 }
 
-const NETWORK_ERROR = 'Could not connect to server. Please check your internet connection.';
 
 function failure(data: { error?: ServerError } | null, fallback: string): AuthResult {
   const err = data?.error;
@@ -240,8 +246,15 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         setStatus('idle');
       }
     } else if (result.status === 'error') {
+      const lang = isUrduRef.current ? 'ur' : 'en';
       setStatus('error');
-      setError(result.message || 'Sync failed');
+      setError(
+        result.kind === 'network'
+          ? networkErrorMessage(lang)
+          : result.kind === 'server'
+            ? serverTroubleMessage(lang)
+            : result.message || 'Sync failed'
+      );
     } else {
       setStatus('idle');
     }
@@ -338,13 +351,18 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
   );
 
   const postJson = useCallback(async (path: string, body: unknown) => {
-    const res = await fetch(getApiEndpoint(path), {
+    const res = await fetchWithTimeout(getApiEndpoint(path), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
     // Non-JSON bodies (proxy errors, HTML) must not crash the screen.
-    const data = await res.json().catch(() => null);
+    let data = await res.json().catch(() => null);
+    if (res.status >= 500) {
+      // Whatever the server said (or an HTML error page), the user only needs to know it is down.
+      logger.warn(`Server error ${res.status} on ${path}`);
+      data = { error: { code: 'SERVER_ERROR', message: serverTroubleMessage(isUrduRef.current ? 'ur' : 'en') } };
+    }
     return { res, data };
   }, []);
 
@@ -359,7 +377,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         if (!res.ok) return failure(data, 'Login failed. Please check your credentials.');
         return await completeAuth(data, options);
       } catch (err) {
-        return { success: false, error: err instanceof Error ? err.message : NETWORK_ERROR };
+        return { success: false, error: describeError(err, isUrduRef.current ? 'ur' : 'en'), code: 'NETWORK' };
       }
     },
     [completeAuth, postJson]
@@ -380,7 +398,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         }
         return failure(data, 'Registration failed.');
       } catch (err) {
-        return { success: false, error: err instanceof Error ? err.message : NETWORK_ERROR };
+        return { success: false, error: describeError(err, isUrduRef.current ? 'ur' : 'en'), code: 'NETWORK' };
       }
     },
     [postJson]
@@ -396,7 +414,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         if (!res.ok) return failure(data, 'Verification failed.');
         return await completeAuth(data, options);
       } catch (err) {
-        return { success: false, error: err instanceof Error ? err.message : NETWORK_ERROR };
+        return { success: false, error: describeError(err, isUrduRef.current ? 'ur' : 'en'), code: 'NETWORK' };
       }
     },
     [completeAuth, postJson]
@@ -416,7 +434,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         }
         return failure(data, 'Could not resend the code.');
       } catch (err) {
-        return { success: false, error: err instanceof Error ? err.message : NETWORK_ERROR };
+        return { success: false, error: describeError(err, isUrduRef.current ? 'ur' : 'en'), code: 'NETWORK' };
       }
     },
     [postJson]
@@ -437,7 +455,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         }
         return failure(data, 'Could not send the reset code.');
       } catch (err) {
-        return { success: false, error: err instanceof Error ? err.message : NETWORK_ERROR };
+        return { success: false, error: describeError(err, isUrduRef.current ? 'ur' : 'en'), code: 'NETWORK' };
       }
     },
     [postJson]
@@ -459,7 +477,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         if (!res.ok) return failure(data, 'Could not reset the password.');
         return await completeAuth(data, options);
       } catch (err) {
-        return { success: false, error: err instanceof Error ? err.message : NETWORK_ERROR };
+        return { success: false, error: describeError(err, isUrduRef.current ? 'ur' : 'en'), code: 'NETWORK' };
       }
     },
     [completeAuth, postJson]
@@ -483,7 +501,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         if (data?.token) await setAuthToken(data.token);
         return { success: true };
       } catch (err) {
-        return { success: false, error: err instanceof Error ? err.message : NETWORK_ERROR };
+        return { success: false, error: describeError(err, isUrduRef.current ? 'ur' : 'en'), code: 'NETWORK' };
       }
     },
     []
