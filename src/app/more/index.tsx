@@ -11,6 +11,7 @@ import { BorderRadius, Layout, Spacing, Typography } from '@/constants/theme';
 import { useAdmin } from '@/context/admin-context';
 import { useLanguage } from '@/context/language-context';
 import { useTheme } from '@/hooks/use-theme';
+import { useSync } from '@/sync';
 
 interface MenuItem {
   key: string;
@@ -22,9 +23,10 @@ interface MenuItem {
 
 export default function MoreScreen() {
   const theme = useTheme();
-  const { t } = useLanguage();
+  const { t, isUrdu } = useLanguage();
   const { farmName, hasPinSet, isAdmin, lockApp, isPinModalOpen, openPinModal, closePinModal } =
     useAdmin();
+  const { signOut, pendingCount } = useSync();
   const [isProfileOpen, setIsProfileOpen] = useState(false);
 
   const openProfile = useCallback(() => {
@@ -35,12 +37,20 @@ export default function MoreScreen() {
     }
   }, [hasPinSet, isAdmin, openPinModal]);
 
-  const confirmLogout = useCallback(() => {
-    Alert.alert(t('moreLogout'), t('moreLogoutConfirm'), [
-      { text: t('cancel'), style: 'cancel' },
-      { text: t('moreLogout'), style: 'destructive', onPress: () => lockApp() },
-    ]);
-  }, [lockApp, t]);
+  const confirmSignOut = useCallback(() => {
+    Alert.alert(
+      t('signOutBtn'),
+      pendingCount > 0
+        ? isUrdu
+          ? `${pendingCount} تبدیلیاں ابھی سنک نہیں ہوئیاں۔ اوہ فون تے رہن گیاں تے دوبارہ لاگ ان تے سنک ہو جان گیاں۔`
+          : `${pendingCount} change(s) have not synced yet. They stay on this phone and sync when you sign in again.`
+        : t('confirmSignOut'),
+      [
+        { text: t('cancel'), style: 'cancel' },
+        { text: t('signOutBtn'), style: 'destructive', onPress: () => signOut().catch(() => {}) },
+      ]
+    );
+  }, [isUrdu, pendingCount, signOut, t]);
 
   const items: MenuItem[] = [
     {
@@ -121,17 +131,34 @@ export default function MoreScreen() {
           ))}
         </AppCard>
 
+        {hasPinSet ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={isUrdu ? 'ایپ لاک کرو' : 'Lock app'}
+            onPress={lockApp}
+            style={({ pressed }) => [
+              styles.logout,
+              { backgroundColor: theme.card, borderColor: theme.border },
+              pressed && { opacity: 0.8 },
+            ]}>
+            <AppIcon name="lock" size={18} color={theme.primary} />
+            <ThemedText style={[styles.logoutText, { color: theme.primary }]}>
+              {isUrdu ? 'ایپ لاک کرو' : 'Lock app'}
+            </ThemedText>
+          </Pressable>
+        ) : null}
+
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={t('moreLogout')}
-          onPress={confirmLogout}
+          accessibilityLabel={t('signOutBtn')}
+          onPress={confirmSignOut}
           style={({ pressed }) => [
             styles.logout,
             { backgroundColor: theme.dangerBg, borderColor: theme.danger + '40' },
             pressed && { opacity: 0.8 },
           ]}>
           <AppIcon name="logout" size={18} color={theme.danger} />
-          <ThemedText style={[styles.logoutText, { color: theme.danger }]}>{t('moreLogout')}</ThemedText>
+          <ThemedText style={[styles.logoutText, { color: theme.danger }]}>{t('signOutBtn')}</ThemedText>
         </Pressable>
       </ScrollView>
 

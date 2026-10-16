@@ -17,6 +17,7 @@ import {
   FilterChip,
 } from '@/components/ui';
 import { BorderRadius, Shadows, Spacing, Typography } from '@/constants/theme';
+import { useLanguage } from '@/context/language-context';
 import {
   AnimalGender,
   AnimalSpecies,
@@ -24,6 +25,7 @@ import {
   NewLivestockAnimal,
 } from '@/db/database';
 import { useTheme } from '@/hooks/use-theme';
+import { genderLabel, speciesLabel, statusLabel } from '@/utils/herd-labels';
 
 export interface AddAnimalModalProps {
   visible: boolean;
@@ -31,12 +33,19 @@ export interface AddAnimalModalProps {
   onSave: (animal: NewLivestockAnimal) => Promise<void>;
 }
 
+const SPECIES_OPTIONS: AnimalSpecies[] = ['Cow', 'Buffalo', 'Calf'];
+const GENDER_OPTIONS: AnimalGender[] = ['Female', 'Male'];
+const ADULT_STATUSES: AnimalStatus[] = ['Lactating', 'Dry', 'Pregnant'];
+
 export function AddAnimalModal({
   visible,
   onClose,
   onSave,
 }: AddAnimalModalProps) {
   const theme = useTheme();
+  const { isUrdu } = useLanguage();
+  const lang = isUrdu ? 'ur' : 'en';
+  const tr = (en: string, ur: string) => (isUrdu ? ur : en);
 
   const [tagNumber, setTagNumber] = useState('');
   const [name, setName] = useState('');
@@ -83,7 +92,12 @@ export function AddAnimalModal({
 
   const handleSubmit = async () => {
     if (!tagNumber.trim()) {
-      setError('Please enter a tag number (e.g. C-19 or B-13).');
+      setError(
+        tr(
+          'Please enter a tag number (e.g. C-19 or B-13).',
+          'ٹیگ نمبر درج کرو (مثلاً C-19 یا B-13)۔'
+        )
+      );
       return;
     }
 
@@ -103,7 +117,9 @@ export function AddAnimalModal({
 
       handleClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to register animal.');
+      setError(
+        err instanceof Error ? err.message : tr('Failed to register animal.', 'جانور درج نہیں ہو سکیا۔')
+      );
     } finally {
       setSaving(false);
     }
@@ -118,29 +134,34 @@ export function AddAnimalModal({
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.overlay}>
-        <Pressable style={styles.backdrop} onPress={handleClose} />
+        <Pressable
+          style={styles.backdrop}
+          onPress={handleClose}
+          accessibilityRole="button"
+          accessibilityLabel={tr('Close', 'بند کرو')}
+        />
 
         <View style={[styles.sheetContainer, { backgroundColor: theme.card, borderColor: theme.border }]}>
           {/* Header */}
           <View style={[styles.modalHeader, { borderBottomColor: theme.border }]}>
-            <View>
-              <ThemedText style={styles.modalTitle}>Add New Animal</ThemedText>
+            <View style={styles.headerText}>
+              <ThemedText style={styles.modalTitle}>{tr('Add New Animal', 'نواں جانور شامل کرو')}</ThemedText>
               <ThemedText style={[styles.modalSubtitle, { color: theme.textSecondary }]}>
-                Register cow, buffalo, or calf in herd
+                {tr('Register cow, buffalo, or calf in herd', 'ریوڑ وچ گائے، بھینس یا بچھڑا درج کرو')}
               </ThemedText>
             </View>
             <Pressable
               onPress={handleClose}
               hitSlop={8}
               accessibilityRole="button"
-              accessibilityLabel="Close"
+              accessibilityLabel={tr('Close', 'بند کرو')}
               style={styles.closeBtn}>
               <AppIcon name="close" size={20} color={theme.textSecondary} />
             </Pressable>
           </View>
 
           {error ? (
-            <View style={[styles.errorBox, { backgroundColor: theme.dangerBg }]}>
+            <View accessibilityRole="alert" style={[styles.errorBox, { backgroundColor: theme.dangerBg }]}>
               <AppIcon name="alert" size={16} color={theme.danger} />
               <ThemedText style={[styles.errorText, { color: theme.danger }]}>
                 {error}
@@ -150,36 +171,33 @@ export function AddAnimalModal({
 
           <ScrollView
             contentContainerStyle={styles.formScroll}
+            keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}>
             {/* 1. Species Selection */}
             <View style={styles.fieldGroup}>
-              <ThemedText style={[styles.fieldLabel, { color: theme.textSecondary }]}>Species</ThemedText>
+              <ThemedText style={[styles.fieldLabel, { color: theme.textSecondary }]}>
+                {tr('Species', 'قسم')}
+              </ThemedText>
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
                 contentContainerStyle={styles.chipsRow}>
-                <FilterChip
-                  label="Cow (Gai)"
-                  selected={species === 'Cow'}
-                  onPress={() => handleSpeciesChange('Cow')}
-                />
-                <FilterChip
-                  label="Buffalo (Bhains)"
-                  selected={species === 'Buffalo'}
-                  onPress={() => handleSpeciesChange('Buffalo')}
-                />
-                <FilterChip
-                  label="Calf (Bachra/i)"
-                  selected={species === 'Calf'}
-                  onPress={() => handleSpeciesChange('Calf')}
-                />
+                {SPECIES_OPTIONS.map((s) => (
+                  <FilterChip
+                    key={s}
+                    label={isUrdu ? speciesLabel(s, lang) : s === 'Cow' ? 'Cow (Gai)' : s === 'Buffalo' ? 'Buffalo (Bhains)' : 'Calf (Bachra/i)'}
+                    selected={species === s}
+                    onPress={() => handleSpeciesChange(s)}
+                  />
+                ))}
               </ScrollView>
             </View>
 
             {/* 2. Tag Number & Name */}
             <AppTextInput
-              label="Tag Number *"
+              label={tr('Tag Number', 'ٹیگ نمبر')}
+              required
               placeholder={species === 'Cow' ? 'C-19' : species === 'Buffalo' ? 'B-13' : 'K-10'}
               value={tagNumber}
               onChangeText={(t) => {
@@ -190,62 +208,63 @@ export function AddAnimalModal({
             />
 
             <AppTextInput
-              label="Animal Name (Optional)"
-              placeholder="e.g. Rani, Sona, Bhuri"
+              label={tr('Animal Name (Optional)', 'جانور دا ناں (اختیاری)')}
+              placeholder={tr('e.g. Rani, Sona, Bhuri', 'مثلاً رانی، سونا، بھوری')}
               value={name}
               onChangeText={setName}
             />
 
             {/* 3. Gender */}
             <View style={styles.fieldGroup}>
-              <ThemedText style={[styles.fieldLabel, { color: theme.textSecondary }]}>Gender</ThemedText>
+              <ThemedText style={[styles.fieldLabel, { color: theme.textSecondary }]}>
+                {tr('Gender', 'جنس')}
+              </ThemedText>
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
                 contentContainerStyle={styles.chipsRow}>
-                <FilterChip
-                  label="Female (Mada)"
-                  selected={gender === 'Female'}
-                  onPress={() => setGender('Female')}
-                />
-                <FilterChip
-                  label="Male (Nar)"
-                  selected={gender === 'Male'}
-                  onPress={() => setGender('Male')}
-                />
+                {GENDER_OPTIONS.map((g) => (
+                  <FilterChip
+                    key={g}
+                    label={isUrdu ? genderLabel(g, lang) : g === 'Female' ? 'Female (Mada)' : 'Male (Nar)'}
+                    selected={gender === g}
+                    onPress={() => setGender(g)}
+                  />
+                ))}
               </ScrollView>
             </View>
 
             {/* 4. Status */}
             <View style={styles.fieldGroup}>
-              <ThemedText style={[styles.fieldLabel, { color: theme.textSecondary }]}>Production / Life Status</ThemedText>
+              <ThemedText style={[styles.fieldLabel, { color: theme.textSecondary }]}>
+                {tr('Production / Life Status', 'پیداوار / حالت')}
+              </ThemedText>
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
                 contentContainerStyle={styles.chipsRow}>
                 {species !== 'Calf' ? (
-                  <>
+                  ADULT_STATUSES.map((s) => (
                     <FilterChip
-                      label="Lactating (Doodh wali)"
-                      selected={status === 'Lactating'}
-                      onPress={() => setStatus('Lactating')}
+                      key={s}
+                      label={
+                        isUrdu
+                          ? statusLabel(s, lang)
+                          : s === 'Lactating'
+                            ? 'Lactating (Doodh wali)'
+                            : s === 'Dry'
+                              ? 'Dry (Khushk)'
+                              : 'Pregnant (Ghaban)'
+                      }
+                      selected={status === s}
+                      onPress={() => setStatus(s)}
                     />
-                    <FilterChip
-                      label="Dry (Khushk)"
-                      selected={status === 'Dry'}
-                      onPress={() => setStatus('Dry')}
-                    />
-                    <FilterChip
-                      label="Pregnant (Ghaban)"
-                      selected={status === 'Pregnant'}
-                      onPress={() => setStatus('Pregnant')}
-                    />
-                  </>
+                  ))
                 ) : (
                   <FilterChip
-                    label="Calf (Bachra)"
+                    label={isUrdu ? statusLabel('Calf', lang) : 'Calf (Bachra)'}
                     selected={status === 'Calf'}
                     onPress={() => setStatus('Calf')}
                   />
@@ -255,16 +274,19 @@ export function AddAnimalModal({
 
             {/* 5. Breed */}
             <AppTextInput
-              label="Breed (Nasal)"
-              placeholder="e.g. Sahiwal, Nili Ravi, Cholistani, Friesian"
+              label={tr('Breed (Nasal)', 'نسل')}
+              placeholder={tr(
+                'e.g. Sahiwal, Nili Ravi, Cholistani, Friesian',
+                'مثلاً ساہیوال، نیلی راوی، چولستانی، فریزین'
+              )}
               value={breed}
               onChangeText={setBreed}
             />
 
             {/* 6. Notes */}
             <AppTextInput
-              label="Notes / Origin"
-              placeholder="e.g. Purchased from Arifwala Mandi"
+              label={tr('Notes / Origin', 'نوٹس / کتھوں آیا')}
+              placeholder={tr('e.g. Purchased from Arifwala Mandi', 'مثلاً عارف والا منڈی توں خریدیا')}
               value={notes}
               onChangeText={setNotes}
               multiline
@@ -277,14 +299,14 @@ export function AddAnimalModal({
             <AppButton
               variant="secondary"
               size="md"
-              title="Cancel"
+              title={tr('Cancel', 'منسوخ')}
               onPress={handleClose}
               style={styles.cancelBtn}
             />
             <AppButton
               variant="primary"
               size="md"
-              title="Register Animal"
+              title={tr('Register Animal', 'جانور درج کرو')}
               loading={saving}
               onPress={handleSubmit}
               style={styles.submitBtn}
@@ -320,6 +342,9 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.md,
     borderBottomWidth: 1,
   },
+  headerText: {
+    flex: 1,
+  },
   modalTitle: {
     fontSize: Typography.title3.fontSize,
     fontWeight: '700',
@@ -343,6 +368,7 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.sm,
   },
   errorText: {
+    flex: 1,
     fontSize: Typography.caption.fontSize,
     fontWeight: '600',
   },

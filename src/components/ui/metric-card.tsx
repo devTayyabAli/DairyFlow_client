@@ -102,7 +102,7 @@ export function HeroFinancialCard({
         <View style={styles.heroShiftsRow}>
           {shifts.map((shift, idx) => (
             <View key={idx} style={styles.heroShiftItem}>
-              <Text style={styles.heroShiftIcon}>{shift.icon ?? (idx === 0 ? '☀️' : '🌙')}</Text>
+              <Text style={styles.heroShiftIcon} accessibilityElementsHidden importantForAccessibility="no">{shift.icon ?? (idx === 0 ? '☀️' : '🌙')}</Text>
               <View>
                 <Text style={[styles.heroShiftLabel, { color: theme.cardDarkSubtext }]}>
                   {shift.label}

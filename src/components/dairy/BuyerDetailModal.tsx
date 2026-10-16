@@ -21,6 +21,7 @@ import { BorderRadius, Layout, Spacing, Typography } from '@/constants/theme';
 import { useLanguage } from '@/context/language-context';
 import { BuyerWithStats, getFilteredEntries, MilkEntry } from '@/db/database';
 import { useTheme } from '@/hooks/use-theme';
+import { logger } from '@/utils/logger';
 
 interface BuyerDetailModalProps {
   visible: boolean;
@@ -81,7 +82,7 @@ export function BuyerDetailModal({
         }
       } catch (err) {
         if (isSubscribed) {
-          console.error('Failed to load buyer recent entries:', err);
+          logger.error('Failed to load buyer recent entries:', err);
           setLoadingEntries(false);
         }
       }

@@ -32,6 +32,8 @@ export function EmptyEntriesState({ shiftFilter = 'All', onAddPress }: EmptyEntr
 
       <Pressable
         onPress={onAddPress}
+        accessibilityRole="button"
+        accessibilityLabel="Add Milk Entry"
         style={({ pressed }) => [
           styles.btn,
           { backgroundColor: theme.primary },

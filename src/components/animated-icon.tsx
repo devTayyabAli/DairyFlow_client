@@ -1,6 +1,6 @@
 import { Image } from 'expo-image';
 import * as SplashScreen from 'expo-splash-screen';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Animated, Easing, StyleSheet, Text, View } from 'react-native';
 
 import { useAdmin } from '@/context/admin-context';
@@ -41,8 +41,8 @@ export function AnimatedSplashOverlay() {
   const { isLoading } = useAdmin();
   const [visible, setVisible] = useState(true);
   const [minElapsed, setMinElapsed] = useState(false);
-  const opacity = useRef(new Animated.Value(1)).current;
-  const scale = useRef(new Animated.Value(0.92)).current;
+  const [opacity] = useState(() => new Animated.Value(1));
+  const [scale] = useState(() => new Animated.Value(0.92));
 
   useEffect(() => {
     Animated.timing(scale, {

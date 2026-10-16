@@ -45,7 +45,7 @@ export function ShiftBadge({ shift, label, size = 'sm', style }: ShiftBadgeProps
         size === 'sm' ? styles.badgeSm : styles.badgeMd,
         style,
       ]}>
-      <Feather name={icon} size={size === 'sm' ? 12 : 14} color={color} />
+      <Feather accessibilityElementsHidden importantForAccessibility="no" name={icon} size={size === 'sm' ? 12 : 14} color={color} />
       <Text
         style={[
           styles.badgeText,
@@ -77,6 +77,7 @@ export function ShiftSelector({ selectedShift, onSelectShift, style }: ShiftSele
           <Pressable
             onPress={() => onSelectShift('Morning')}
             accessibilityRole="button"
+            accessibilityLabel={isUrdu ? 'صبح (سویر)' : 'Morning'}
             accessibilityState={{ selected: isSelected }}
             style={({ pressed }) => [
               styles.selectorItem,
@@ -86,7 +87,7 @@ export function ShiftSelector({ selectedShift, onSelectShift, style }: ShiftSele
               },
               pressed && styles.pressed,
             ]}>
-            <Feather
+            <Feather accessibilityElementsHidden importantForAccessibility="no"
               name="sun"
               size={18}
               color={isSelected ? theme.morning : theme.textSecondary}
@@ -99,7 +100,7 @@ export function ShiftSelector({ selectedShift, onSelectShift, style }: ShiftSele
               {isUrdu ? 'صبح (سویر)' : 'Morning'}
             </Text>
             {isSelected ? (
-              <Ionicons name="checkmark-circle" size={18} color={theme.morning} />
+              <Ionicons accessibilityElementsHidden importantForAccessibility="no" name="checkmark-circle" size={18} color={theme.morning} />
             ) : null}
           </Pressable>
         );
@@ -112,6 +113,7 @@ export function ShiftSelector({ selectedShift, onSelectShift, style }: ShiftSele
           <Pressable
             onPress={() => onSelectShift('Evening')}
             accessibilityRole="button"
+            accessibilityLabel={isUrdu ? 'شام (سنجھ)' : 'Evening'}
             accessibilityState={{ selected: isSelected }}
             style={({ pressed }) => [
               styles.selectorItem,
@@ -121,7 +123,7 @@ export function ShiftSelector({ selectedShift, onSelectShift, style }: ShiftSele
               },
               pressed && styles.pressed,
             ]}>
-            <Feather
+            <Feather accessibilityElementsHidden importantForAccessibility="no"
               name="moon"
               size={18}
               color={isSelected ? theme.evening : theme.textSecondary}
@@ -134,7 +136,7 @@ export function ShiftSelector({ selectedShift, onSelectShift, style }: ShiftSele
               {isUrdu ? 'شام (سنجھ)' : 'Evening'}
             </Text>
             {isSelected ? (
-              <Ionicons name="checkmark-circle" size={18} color={theme.evening} />
+              <Ionicons accessibilityElementsHidden importantForAccessibility="no" name="checkmark-circle" size={18} color={theme.evening} />
             ) : null}
           </Pressable>
         );
@@ -255,7 +257,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    height: 48,
+    minHeight: 48,
     borderRadius: BorderRadius.md,
     borderWidth: 1.5,
   },

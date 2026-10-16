@@ -28,6 +28,7 @@ import {
   NewExpense,
   updateExpense,
 } from '@/db/database';
+import { useLanguage } from '@/context/language-context';
 import { useTheme } from '@/hooks/use-theme';
 
 const EXPENSE_CATEGORIES: ExpenseCategory[] = [
@@ -68,6 +69,11 @@ export function AddExpenseModal({
 }: AddExpenseModalProps) {
   const db = useSQLiteContext();
   const theme = useTheme();
+  const { isUrdu } = useLanguage();
+  const tr = (en: string, ur: string) => (isUrdu ? ur : en);
+
+  const unitLabelFor = (u: string) =>
+    isUrdu ? ({ kg: 'کلو', bags: 'بوریاں', bales: 'گٹھے', maund: 'من' } as Record<string, string>)[u] ?? u : u;
 
   // Local calendar date helper (YYYY-MM-DD)
   const getTodayLocalDate = (): string => {
@@ -174,12 +180,15 @@ export function AddExpenseModal({
     // If user entered significant data, warn before discarding
     if ((title.trim() || amount.trim()) && !isSubmitting) {
       Alert.alert(
-        'Discard Expense?',
-        'You have unsaved changes. Are you sure you want to discard this expense entry?',
+        tr('Discard Expense?', 'خرچہ ختم کریں؟'),
+        tr(
+          'You have unsaved changes. Are you sure you want to discard this expense entry?',
+          'آپ کی تبدیلیاں محفوظ نہیں ہوئیں۔ کیا آپ واقعی یہ خرچہ ختم کرنا چاہتے ہیں؟'
+        ),
         [
-          { text: 'Keep Editing', style: 'cancel' },
+          { text: tr('Keep Editing', 'ترمیم جاری رکھیں'), style: 'cancel' },
           {
-            text: 'Discard',
+            text: tr('Discard', 'ختم کریں'),
             style: 'destructive',
             onPress: () => {
               resetForm();
@@ -200,24 +209,27 @@ export function AddExpenseModal({
 
     // 1. Date
     if (!date.trim()) {
-      newErrors.date = 'Date is required.';
+      newErrors.date = tr('Date is required.', 'تاریخ درج کرنا ضروری ہے۔');
     } else if (!/^\d{4}-\d{2}-\d{2}$/.test(date.trim())) {
-      newErrors.date = 'Date must be formatted as YYYY-MM-DD.';
+      newErrors.date = tr(
+        'Date must be formatted as YYYY-MM-DD.',
+        'تاریخ YYYY-MM-DD کی شکل میں ہونی چاہیے۔'
+      );
     }
 
     // 2. Title
     if (!title.trim()) {
       newErrors.title = isFeed
-        ? 'Please enter feed or fodder name.'
-        : 'Please enter expense title.';
+        ? tr('Please enter feed or fodder name.', 'براہ کرم ونڈا یا چارے کا نام درج کریں۔')
+        : tr('Please enter expense title.', 'براہ کرم خرچے کا عنوان درج کریں۔');
     }
 
     // 3. Amount
     const parsedAmount = parseFloat(amount);
     if (!amount.trim() || isNaN(parsedAmount)) {
-      newErrors.amount = 'Please enter total amount.';
+      newErrors.amount = tr('Please enter total amount.', 'براہ کرم کل رقم درج کریں۔');
     } else if (parsedAmount <= 0) {
-      newErrors.amount = 'Amount must be greater than 0.';
+      newErrors.amount = tr('Amount must be greater than 0.', 'رقم 0 سے زیادہ ہونی چاہیے۔');
     }
 
     // 4. Feed-specific validation
@@ -227,13 +239,13 @@ export function AddExpenseModal({
 
       if (quantity.trim()) {
         if (isNaN(parsedQty) || parsedQty <= 0) {
-          newErrors.quantity = 'Quantity must be greater than 0.';
+          newErrors.quantity = tr('Quantity must be greater than 0.', 'مقدار 0 سے زیادہ ہونی چاہیے۔');
         }
       }
 
       if (unitPrice.trim()) {
         if (isNaN(parsedPrice) || parsedPrice <= 0) {
-          newErrors.unitPrice = 'Price must be greater than 0.';
+          newErrors.unitPrice = tr('Price must be greater than 0.', 'قیمت 0 سے زیادہ ہونی چاہیے۔');
         }
       }
 
@@ -247,14 +259,16 @@ export function AddExpenseModal({
       ) {
         const expected = Math.round(parsedQty * parsedPrice);
         if (Math.abs(parsedAmount - expected) > 1.0) {
-          newErrors.amount = `Amount (${currencySymbol} ${parsedAmount}) does not match ${parsedQty} ${unit} × ${currencySymbol} ${parsedPrice} (${currencySymbol} ${expected}).`;
+          newErrors.amount = isUrdu
+            ? `رقم (${currencySymbol} ${parsedAmount}) مقدار ${parsedQty} ${unitLabelFor(unit)} × ${currencySymbol} ${parsedPrice} (${currencySymbol} ${expected}) سے مطابقت نہیں رکھتی۔`
+            : `Amount (${currencySymbol} ${parsedAmount}) does not match ${parsedQty} ${unit} × ${currencySymbol} ${parsedPrice} (${currencySymbol} ${expected}).`;
         }
       }
     }
 
     setErrors(newErrors);
     if (Object.keys(newErrors).length > 0) {
-      setGeneralError('Please check highlighted errors.');
+      setGeneralError(tr('Please check highlighted errors.', 'براہ کرم نمایاں غلطیاں درست کریں۔'));
       return false;
     }
 
@@ -300,7 +314,7 @@ export function AddExpenseModal({
       onClose();
     } catch (err: any) {
       setIsSubmitting(false);
-      setGeneralError(err?.message || 'Failed to save expense record.');
+      setGeneralError(err?.message || tr('Failed to save expense record.', 'خرچے کا ریکارڈ محفوظ نہیں ہو سکا۔'));
     }
   };
 
@@ -332,17 +346,19 @@ export function AddExpenseModal({
               onPress={handleClose}
               hitSlop={12}
               accessibilityRole="button"
-              accessibilityLabel="Close add expense modal"
+              accessibilityLabel={tr('Close add expense modal', 'خرچہ شامل کرنے کی ونڈو بند کریں')}
               style={({ pressed }) => [styles.closeBtn, pressed && styles.pressed]}>
               <Ionicons name="arrow-back" size={22} color={theme.text} />
             </Pressable>
 
             <View style={styles.headerTitleGroup}>
               <ThemedText style={styles.headerTitle}>
-                {expenseToEdit ? 'Edit Expense' : 'Add Expense'}
+                {expenseToEdit ? tr('Edit Expense', 'خرچے میں ترمیم') : tr('Add Expense', 'خرچہ شامل کریں')}
               </ThemedText>
               <ThemedText style={[styles.headerSubtitle, { color: theme.textSecondary }]}>
-                {isFeed ? 'Feed purchases & fodder' : 'Farm operating expenditure'}
+                {isFeed
+                  ? tr('Feed purchases & fodder', 'ونڈے اور چارے کی خریداری')
+                  : tr('Farm operating expenditure', 'فارم کے آپریشنل اخراجات')}
               </ThemedText>
             </View>
 
@@ -363,7 +379,10 @@ export function AddExpenseModal({
               <View style={styles.noticeRow}>
                 <AppIcon name="sync" size={13} color={theme.accent} />
                 <ThemedText style={[styles.noticeText, { color: theme.accent }]}>
-                  Local SQLite Storage · Saved instantly on your device
+                  {tr(
+                    'Local SQLite Storage · Saved instantly on your device',
+                    'مقامی SQLite اسٹوریج · آپ کے فون میں فوراً محفوظ'
+                  )}
                 </ThemedText>
               </View>
             </AppCard>
@@ -384,7 +403,7 @@ export function AddExpenseModal({
             {/* 1. CATEGORY SELECTOR CHIPS                                */}
             {/* ========================================================= */}
             <AppCard variant="default" padding="md" style={styles.sectionCard}>
-              <ThemedText style={[styles.fieldSectionLabel, { color: theme.textSecondary }]}>Expense Category *</ThemedText>
+              <ThemedText style={[styles.fieldSectionLabel, { color: theme.textSecondary }]}>{tr('Expense Category *', 'خرچے کی قسم *')}</ThemedText>
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
@@ -397,18 +416,18 @@ export function AddExpenseModal({
                       key={cat}
                       label={
                         cat === 'Feed'
-                          ? '🌾 Feed & Fodder'
+                          ? tr('🌾 Feed & Fodder', '🌾 ونڈا / چارہ')
                           : cat === 'Labour'
-                          ? '👥 Labour'
+                          ? tr('👥 Labour', '👥 مزدوری')
                           : cat === 'Veterinary'
-                          ? '💊 Veterinary'
+                          ? tr('💊 Veterinary', '💊 ڈاکٹر / دوا')
                           : cat === 'Transport'
-                          ? '🚚 Transport'
+                          ? tr('🚚 Transport', '🚚 ٹرانسپورٹ / کرایہ')
                           : cat === 'Utilities'
-                          ? '⚡ Utilities'
+                          ? tr('⚡ Utilities', '⚡ بل / سہولیات')
                           : cat === 'Maintenance'
-                          ? '🔧 Maintenance'
-                          : '📋 Other'
+                          ? tr('🔧 Maintenance', '🔧 مرمت')
+                          : tr('📋 Other', '📋 دیگر')
                       }
                       selected={isSelected}
                       onPress={() => {
@@ -429,14 +448,16 @@ export function AddExpenseModal({
               <View style={styles.cardHeaderRow}>
                 <View style={styles.labelWithIcon}>
                   <AppIcon name="calendar" size={15} color={theme.primary} />
-                  <ThemedText style={[styles.fieldSectionLabel, { color: theme.textSecondary }]}>Expense Date *</ThemedText>
+                  <ThemedText style={[styles.fieldSectionLabel, { color: theme.textSecondary }]}>{tr('Expense Date *', 'خرچے کی تاریخ *')}</ThemedText>
                 </View>
                 <Pressable
                   onPress={() => setIsDatePickerOpen(!isDatePickerOpen)}
+                  accessibilityRole="button"
+                  accessibilityState={{ expanded: isDatePickerOpen }}
                   hitSlop={8}
                   style={({ pressed }) => [styles.changeDateBtn, pressed && styles.pressed]}>
                   <ThemedText style={[styles.changeDateText, { color: theme.primaryDark }]}>
-                    {isDatePickerOpen ? 'Done' : 'Change'}
+                    {isDatePickerOpen ? tr('Done', 'مکمل') : tr('Change', 'تبدیل کریں')}
                   </ThemedText>
                 </Pressable>
               </View>
@@ -444,12 +465,12 @@ export function AddExpenseModal({
               {/* Quick Presets Row */}
               <View style={styles.dateChipsRow}>
                 <FilterChip
-                  label="Today"
+                  label={tr('Today', 'آج')}
                   selected={date === todayStr}
                   onPress={() => handleSetPresetDate(0)}
                 />
                 <FilterChip
-                  label="Yesterday"
+                  label={tr('Yesterday', 'کل')}
                   selected={
                     (() => {
                       const y = new Date();
@@ -471,7 +492,7 @@ export function AddExpenseModal({
               {isDatePickerOpen ? (
                 <View style={styles.customDateWrap}>
                   <AppTextInput
-                    label="Custom Date (YYYY-MM-DD)"
+                    label={tr('Custom Date (YYYY-MM-DD)', 'اپنی تاریخ (YYYY-MM-DD)')}
                     placeholder="YYYY-MM-DD"
                     value={date}
                     onChangeText={(val) => {
@@ -489,17 +510,21 @@ export function AddExpenseModal({
             {/* ========================================================= */}
             <AppCard variant="default" padding="md" style={styles.sectionCard}>
               <AppTextInput
-                label={isFeed ? 'Feed / Fodder Item *' : 'Expense Title *'}
+                label={
+                  isFeed
+                    ? tr('Feed / Fodder Item *', 'ونڈا / چارے کا نام *')
+                    : tr('Expense Title *', 'خرچے کا عنوان *')
+                }
                 placeholder={
                   isFeed
-                    ? 'e.g. Wheat straw, Wanda, Silage'
+                    ? tr('e.g. Wheat straw, Wanda, Silage', 'مثلاً توڑی، ونڈا، سائیلیج')
                     : category === 'Labour'
-                    ? 'e.g. Farm wages, Milking labour'
+                    ? tr('e.g. Farm wages, Milking labour', 'مثلاً فارم کی اجرت، دودھ نکالنے کی مزدوری')
                     : category === 'Veterinary'
-                    ? 'e.g. HS Vaccine, Doctor checkup'
+                    ? tr('e.g. HS Vaccine, Doctor checkup', 'مثلاً گلہڑ کی ویکسین، ڈاکٹر کا معائنہ')
                     : category === 'Transport'
-                    ? 'e.g. Milk delivery diesel, Tractor fuel'
-                    : 'e.g. Electricity bill, Machinery repair'
+                    ? tr('e.g. Milk delivery diesel, Tractor fuel', 'مثلاً دودھ کی ترسیل کا ڈیزل، ٹریکٹر کا تیل')
+                    : tr('e.g. Electricity bill, Machinery repair', 'مثلاً بجلی کا بل، مشینری کی مرمت')
                 }
                 value={title}
                 onChangeText={(val) => {
@@ -518,8 +543,11 @@ export function AddExpenseModal({
               />
 
               <AppTextInput
-                label="Supplier / Vendor / Payee (Optional)"
-                placeholder="e.g. Tariq Fodder, Al-Hafiz Feeds, Dr. Usman"
+                label={tr('Supplier / Vendor / Payee (Optional)', 'سپلائر / دکاندار / وصول کنندہ (اختیاری)')}
+                placeholder={tr(
+                  'e.g. Tariq Fodder, Al-Hafiz Feeds, Dr. Usman',
+                  'مثلاً طارق چارہ، الحافظ فیڈز، ڈاکٹر عثمان'
+                )}
                 value={supplierOrPayee}
                 onChangeText={setSupplierOrPayee}
                 leftIcon={<AppIcon name="user" size={16} color={theme.textMuted} />}
@@ -535,17 +563,17 @@ export function AddExpenseModal({
                 <View style={styles.labelWithIcon}>
                   <MaterialCommunityIcons name="scale" size={16} color={theme.primary} />
                   <ThemedText style={[styles.fieldSectionLabel, { color: theme.textSecondary }]}>
-                    Quantity & Rate Breakdown (Optional)
+                    {tr('Quantity & Rate Breakdown (Optional)', 'مقدار اور نرخ کی تفصیل (اختیاری)')}
                   </ThemedText>
                 </View>
 
                 {/* Unit Selector Pills */}
                 <View style={styles.unitPillsRow}>
-                  <ThemedText style={[styles.unitLabelText, { color: theme.textSecondary }]}>Unit:</ThemedText>
+                  <ThemedText style={[styles.unitLabelText, { color: theme.textSecondary }]}>{tr('Unit:', 'اکائی:')}</ThemedText>
                   {FEED_UNITS.map((u) => (
                     <FilterChip
                       key={u}
-                      label={u}
+                      label={unitLabelFor(u)}
                       selected={unit === u}
                       onPress={() => setUnit(u)}
                     />
@@ -556,8 +584,8 @@ export function AddExpenseModal({
                 <View style={styles.twoColumnRow}>
                   <View style={styles.columnHalf}>
                     <AppTextInput
-                      label={`Quantity (${unit})`}
-                      placeholder="e.g. 100"
+                      label={isUrdu ? `مقدار (${unitLabelFor(unit)})` : `Quantity (${unit})`}
+                      placeholder={tr('e.g. 100', 'مثلاً 100')}
                       value={quantity}
                       onChangeText={handleQuantityChange}
                       keyboardType="decimal-pad"
@@ -567,8 +595,12 @@ export function AddExpenseModal({
 
                   <View style={styles.columnHalf}>
                     <AppTextInput
-                      label={`Rate (${currencySymbol} / ${unit})`}
-                      placeholder="e.g. 40"
+                      label={
+                        isUrdu
+                          ? `نرخ (${currencySymbol} / ${unitLabelFor(unit)})`
+                          : `Rate (${currencySymbol} / ${unit})`
+                      }
+                      placeholder={tr('e.g. 40', 'مثلاً 40')}
                       value={unitPrice}
                       onChangeText={handleUnitPriceChange}
                       keyboardType="decimal-pad"
@@ -584,8 +616,10 @@ export function AddExpenseModal({
             {/* ========================================================= */}
             <AppCard variant="default" padding="md" style={styles.sectionCard}>
               <AppTextInput
-                label={`Total Amount (${currencySymbol}) *`}
-                placeholder="e.g. 4000"
+                label={
+                  isUrdu ? `کل رقم (${currencySymbol}) *` : `Total Amount (${currencySymbol}) *`
+                }
+                placeholder={tr('e.g. 4000', 'مثلاً 4000')}
                 value={amount}
                 onChangeText={(val) => {
                   setAmount(val);
@@ -600,7 +634,7 @@ export function AddExpenseModal({
               {amount.trim() && !isNaN(parseFloat(amount)) && parseFloat(amount) > 0 ? (
                 <View style={[styles.amountPreviewBanner, { backgroundColor: theme.primaryLight }]}>
                   <ThemedText style={[styles.previewLabel, { color: theme.primaryDark }]}>
-                    Recorded Cost:
+                    {tr('Recorded Cost:', 'درج شدہ لاگت:')}
                   </ThemedText>
                   <ThemedText style={[styles.previewAmount, { color: theme.primaryDark }]}>
                     {currencySymbol} {Math.round(parseFloat(amount)).toLocaleString()}
@@ -610,7 +644,7 @@ export function AddExpenseModal({
 
               {/* Payment Method Selector */}
               <View style={styles.paymentMethodSection}>
-                <ThemedText style={[styles.fieldSectionLabel, { color: theme.textSecondary }]}>Payment Method:</ThemedText>
+                <ThemedText style={[styles.fieldSectionLabel, { color: theme.textSecondary }]}>{tr('Payment Method:', 'ادائیگی کا طریقہ:')}</ThemedText>
                 <ScrollView
                   horizontal
                   showsHorizontalScrollIndicator={false}
@@ -619,7 +653,13 @@ export function AddExpenseModal({
                   {PAYMENT_METHODS.map((pm) => (
                     <FilterChip
                       key={pm}
-                      label={pm === 'Cash' ? '💵 Cash' : pm === 'Bank Transfer' ? '🏦 Bank' : '⏳ Credit / Due'}
+                      label={
+                        pm === 'Cash'
+                          ? tr('💵 Cash', '💵 نقد')
+                          : pm === 'Bank Transfer'
+                          ? tr('🏦 Bank', '🏦 بینک ٹرانسفر')
+                          : tr('⏳ Credit / Due', '⏳ ادھار / واجب الادا')
+                      }
                       selected={paymentMethod === pm}
                       onPress={() => setPaymentMethod(pm)}
                     />
@@ -629,8 +669,8 @@ export function AddExpenseModal({
 
               {/* Optional Notes */}
               <AppTextInput
-                label="Notes / Receipt Details (Optional)"
-                placeholder="e.g. Bilty # 849, Paid by foreman"
+                label={tr('Notes / Receipt Details (Optional)', 'نوٹس / رسید کی تفصیل (اختیاری)')}
+                placeholder={tr('e.g. Bilty # 849, Paid by foreman', 'مثلاً بلٹی نمبر 849، منشی نے ادا کیا')}
                 value={notes}
                 onChangeText={setNotes}
               />
@@ -643,7 +683,7 @@ export function AddExpenseModal({
               <AppButton
                 variant="secondary"
                 size="lg"
-                title="Cancel"
+                title={tr('Cancel', 'منسوخ')}
                 onPress={handleClose}
                 disabled={isSubmitting}
                 style={styles.cancelBtn}
@@ -654,10 +694,10 @@ export function AddExpenseModal({
                 size="lg"
                 title={
                   isSubmitting
-                    ? 'Saving...'
+                    ? tr('Saving...', 'محفوظ ہو رہا ہے...')
                     : expenseToEdit
-                      ? 'Save Changes'
-                      : 'Save Expense'
+                      ? tr('Save Changes', 'تبدیلیاں محفوظ کریں')
+                      : tr('Save Expense', 'خرچہ محفوظ کریں')
                 }
                 loading={isSubmitting}
                 icon={<AppIcon name="check" size={17} color="#FFFFFF" />}

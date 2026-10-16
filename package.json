@@ -1,12 +1,14 @@
 {
-  "name": "mobile",
+  "name": "dairyflow-mobile",
   "main": "expo-router/entry",
   "version": "1.0.0",
+  "description": "DairyFlow mobile app: offline-first dairy farm management (Expo, React Native).",
   "dependencies": {
     "@expo/ui": "~57.0.23",
     "@expo/vector-icons": "^15.0.2",
     "expo": "~57.0.28",
     "expo-constants": "~57.0.21",
+    "expo-crypto": "~57.0.4",
     "expo-device": "~57.0.2",
     "expo-document-picker": "~57.0.3",
     "expo-file-system": "~57.0.7",
@@ -15,6 +17,7 @@
     "expo-image": "~57.0.5",
     "expo-linking": "~57.0.12",
     "expo-network": "~57.0.2",
+    "expo-print": "~57.0.2",
     "expo-router": "~57.0.26",
     "expo-secure-store": "~57.0.4",
     "expo-sharing": "~57.0.23",
@@ -43,11 +46,12 @@
   },
   "scripts": {
     "start": "expo start",
-    "reset-project": "node ./scripts/reset-project.js",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
     "lint": "expo lint",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm run lint",
     "test": "node ./scripts/test-audit.js && node ./scripts/test-workflows.js"
   },
   "private": true

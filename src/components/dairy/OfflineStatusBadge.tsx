@@ -67,6 +67,7 @@ export function OfflineStatusBadge({ compact = false, onPress }: OfflineStatusBa
         onPress={handlePress}
         accessibilityRole="button"
         accessibilityLabel={label}
+        hitSlop={8}
         style={({ pressed }) => [
           styles.compactBadge,
           {
@@ -97,6 +98,7 @@ export function OfflineStatusBadge({ compact = false, onPress }: OfflineStatusBa
       onPress={handlePress}
       accessibilityRole="button"
       accessibilityLabel={fullLabel}
+      hitSlop={8}
       style={({ pressed }) => [
         styles.badge,
         { backgroundColor: theme.backgroundElement },

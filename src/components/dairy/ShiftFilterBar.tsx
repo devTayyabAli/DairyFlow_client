@@ -74,6 +74,7 @@ export function ShiftFilterBar({
           onPress={handlePrevDay}
           accessibilityRole="button"
           accessibilityLabel="Previous Day"
+          hitSlop={{ top: 8, bottom: 8 }}
           style={({ pressed }) => [styles.dateNavBtn, pressed && styles.pressed]}>
           <Ionicons name="chevron-back" size={16} color={theme.primary} />
           <ThemedText style={[styles.dateNavBtnText, { color: theme.primary }]}>
@@ -85,6 +86,7 @@ export function ShiftFilterBar({
           onPress={handleGoToday}
           accessibilityRole="button"
           accessibilityLabel="Go to Today"
+          hitSlop={{ top: 8, bottom: 8 }}
           style={({ pressed }) => [
             styles.todayBtn,
             isToday && { backgroundColor: theme.primaryLight },
@@ -108,6 +110,7 @@ export function ShiftFilterBar({
           onPress={handleNextDay}
           accessibilityRole="button"
           accessibilityLabel="Next Day"
+          hitSlop={{ top: 8, bottom: 8 }}
           style={({ pressed }) => [styles.dateNavBtn, pressed && styles.pressed]}>
           <ThemedText style={[styles.dateNavBtnText, { color: theme.primary }]}>
             Next
@@ -126,7 +129,9 @@ export function ShiftFilterBar({
                 key={shift}
                 onPress={() => onSelectShift(shift)}
                 accessibilityRole="button"
+                accessibilityLabel={shift}
                 accessibilityState={{ selected: isSelected }}
+                hitSlop={{ top: 4, bottom: 4 }}
                 style={({ pressed }) => [
                   styles.segmentBtn,
                   {
@@ -155,6 +160,8 @@ export function ShiftFilterBar({
           <Pressable
             onPress={onOpenAddModal}
             accessibilityRole="button"
+            accessibilityLabel="Add milk entry"
+            hitSlop={{ top: 4, bottom: 4 }}
             style={({ pressed }) => [
               styles.addEntryBtn,
               { backgroundColor: theme.primary },

@@ -23,6 +23,8 @@ export function LanguageToggleButton() {
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="اردو منتخب کریں"
+        accessibilityState={{ selected: isUrdu }}
+        hitSlop={{ top: 8, bottom: 8 }}
         onPress={() => setLanguage('ur')}
         style={[
           styles.segment,
@@ -42,6 +44,8 @@ export function LanguageToggleButton() {
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="Select English"
+        accessibilityState={{ selected: !isUrdu }}
+        hitSlop={{ top: 8, bottom: 8 }}
         onPress={() => setLanguage('en')}
         style={[
           styles.segment,

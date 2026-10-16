@@ -38,6 +38,7 @@ import {
   setAuthToken,
   setStoredFarmProfile,
 } from './sync-storage';
+import { retryDelayMs } from './retry-schedule';
 import { FarmProfile, SyncResult, SyncStatus } from './sync-types';
 
 export interface AuthResult {
@@ -99,6 +100,14 @@ interface SyncContextValue {
   lastSyncedAt: string | null;
   syncNow: () => Promise<SyncResult>;
   isSignedIn: boolean;
+  /** false until the saved session (token) has been read at startup; gate waits for it. */
+  isSessionReady: boolean;
+  /**
+   * True while a phone that predates accounts is used without signing in (this launch only).
+   * Turning it off sends the user back to the sign-in screen.
+   */
+  isOfflineMode: boolean;
+  setOfflineMode: (value: boolean) => void;
   farm: FarmProfile | null;
   isSessionExpired: boolean;
   error: string | null;
@@ -110,6 +119,17 @@ interface SyncContextValue {
   /** Step 2 of signup: confirms the emailed code, then signs in. */
   verifyOtp: (email: string, otp: string, options?: AuthOptions) => Promise<AuthResult>;
   resendOtp: (email: string) => Promise<AuthResult>;
+  /** Emails a password-reset code. Always reports success for well-formed requests (no enumeration). */
+  forgotPassword: (email: string) => Promise<AuthResult>;
+  /** Sets a new password using the emailed code, then signs in. */
+  resetPassword: (
+    email: string,
+    otp: string,
+    newPassword: string,
+    options?: AuthOptions
+  ) => Promise<AuthResult>;
+  /** Signed-in users only. Other devices are signed out by the server. */
+  changePassword: (currentPassword: string, newPassword: string) => Promise<AuthResult>;
   signOut: () => Promise<void>;
 }
 
@@ -119,12 +139,14 @@ const WRITE_DEBOUNCE_MS = 3000;
 
 export function SyncProvider({ children }: { children: React.ReactNode }) {
   const db = useSQLiteContext();
-  const { reloadSettings } = useAdmin();
+  const { reloadSettings, skipRegistration } = useAdmin();
   const { isUrdu } = useLanguage();
   const [status, setStatus] = useState<SyncStatus>('idle');
   const [pendingCount, setPendingCount] = useState<number>(0);
   const [lastSyncedAt, setLastSyncedAtState] = useState<string | null>(null);
   const [isSignedIn, setIsSignedInState] = useState<boolean>(false);
+  const [isSessionReady, setIsSessionReady] = useState<boolean>(false);
+  const [isOfflineMode, setOfflineMode] = useState<boolean>(false);
   const [farm, setFarm] = useState<FarmProfile | null>(null);
   const [isSessionExpired, setIsSessionExpired] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -135,6 +157,41 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
   const isUrduRef = useRef<boolean>(isUrdu);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scheduleSyncRef = useRef<() => void>(() => {});
+
+  // Automatic retry after a failed sync (server down, timeout…): 30 s, 1 min, then every 5 min.
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const retryAttemptRef = useRef<number>(0);
+  const sessionExpiredRef = useRef<boolean>(false);
+  const syncNowRef = useRef<() => Promise<SyncResult>>(async () => ({ status: 'skipped' }));
+
+  const clearRetry = useCallback(() => {
+    if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+    retryTimerRef.current = null;
+    retryAttemptRef.current = 0;
+  }, []);
+
+  const scheduleRetry = useCallback(() => {
+    // Nothing to retry once signed out, or when only a new sign-in can help.
+    if (!isSignedInRef.current || sessionExpiredRef.current) return;
+    if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+    const delay = retryDelayMs(retryAttemptRef.current);
+    retryAttemptRef.current += 1;
+    retryTimerRef.current = setTimeout(() => {
+      retryTimerRef.current = null;
+      syncNowRef.current().catch(() => {});
+    }, delay);
+  }, []);
+
+  const scheduleRetryRef = useRef<() => void>(() => {});
+  const clearRetryRef = useRef<() => void>(() => {});
+
+  useEffect(() => {
+    scheduleRetryRef.current = scheduleRetry;
+    clearRetryRef.current = clearRetry;
+  }, [scheduleRetry, clearRetry]);
+
+  // Never leave a timer running after the provider goes away.
+  useEffect(() => clearRetry, [clearRetry]);
 
   useEffect(() => {
     isUrduRef.current = isUrdu;
@@ -189,8 +246,16 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       setStatus('idle');
     }
 
+    // A failed attempt schedules its own retry; any success ends the back-off.
+    if (result.status === 'error') scheduleRetryRef.current();
+    else if (result.status === 'success') clearRetryRef.current();
+
     return result;
   }, [db, refreshStats]);
+
+  useEffect(() => {
+    syncNowRef.current = syncNow;
+  }, [syncNow]);
 
   const scheduleSync = useCallback(() => {
     if (!isSignedInRef.current) return;
@@ -245,6 +310,8 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       await setSyncFarmId(db, data.farm.id);
       setSignedIn(true);
       setFarm(data.farm);
+      sessionExpiredRef.current = false;
+      clearRetry();
       setIsSessionExpired(false);
 
       // Reflect the farm profile locally so the app shows the account's name/owner/rate.
@@ -256,6 +323,9 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       }
       await setAppSetting(db, 'is_registered', '1');
       await reloadSettings();
+      // Proving the account password is owner-level authentication: enter the app as admin
+      // without asking for the local PIN right after.
+      await skipRegistration();
 
       // Queue this phone's own (non-demo) data, then run the first two-way sync.
       await enqueueAllUserDataForSync(db);
@@ -264,7 +334,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
 
       return { success: true };
     },
-    [db, refreshStats, reloadSettings, setSignedIn, syncNow]
+    [clearRetry, db, refreshStats, reloadSettings, skipRegistration, setSignedIn, syncNow]
   );
 
   const postJson = useCallback(async (path: string, body: unknown) => {
@@ -352,6 +422,73 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     [postJson]
   );
 
+  const forgotPassword = useCallback(
+    async (email: string): Promise<AuthResult> => {
+      try {
+        const normalized = email.trim().toLowerCase();
+        const { res, data } = await postJson('/auth/forgot-password', { email: normalized });
+        if (res.status === 202) {
+          return {
+            success: true,
+            otpRequired: true,
+            email: normalized,
+            resendAfterSeconds: data?.resendAfterSeconds,
+          };
+        }
+        return failure(data, 'Could not send the reset code.');
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : NETWORK_ERROR };
+      }
+    },
+    [postJson]
+  );
+
+  const resetPassword = useCallback(
+    async (
+      email: string,
+      otp: string,
+      newPassword: string,
+      options?: AuthOptions
+    ): Promise<AuthResult> => {
+      try {
+        const { res, data } = await postJson('/auth/reset-password', {
+          email: email.trim().toLowerCase(),
+          otp: otp.trim(),
+          newPassword,
+        });
+        if (!res.ok) return failure(data, 'Could not reset the password.');
+        return await completeAuth(data, options);
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : NETWORK_ERROR };
+      }
+    },
+    [completeAuth, postJson]
+  );
+
+  const changePassword = useCallback(
+    async (currentPassword: string, newPassword: string): Promise<AuthResult> => {
+      try {
+        const token = await getAuthToken();
+        if (!token) return { success: false, error: 'Not signed in', code: 'NOT_SIGNED_IN' };
+
+        const res = await fetch(getApiEndpoint('/auth/change-password'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ currentPassword, newPassword }),
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok) return failure(data, 'Could not change the password.');
+
+        // The server issues a fresh token and invalidates every older one (other devices).
+        if (data?.token) await setAuthToken(data.token);
+        return { success: true };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : NETWORK_ERROR };
+      }
+    },
+    []
+  );
+
   const updateApiUrl = useCallback(
     async (newUrl: string) => {
       const clean = newUrl.trim();
@@ -364,17 +501,22 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = useCallback(async () => {
     if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    clearRetry();
     await clearAuthToken();
     await clearStoredFarmProfile();
     setSignedIn(false);
     setFarm(null);
+    sessionExpiredRef.current = false;
     setIsSessionExpired(false);
     setStatus('idle');
     setError(null);
-  }, [setSignedIn]);
+  }, [clearRetry, setSignedIn]);
 
   useEffect(() => {
     onSessionExpired(() => {
+      // Retrying cannot fix an expired session; only signing in again can.
+      sessionExpiredRef.current = true;
+      clearRetryRef.current();
       setIsSessionExpired(true);
       setStatus('error');
       setError('Session expired. Please sign in again.');
@@ -400,6 +542,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       if (!isMounted) return;
       setSignedIn(Boolean(token));
       setFarm(storedFarm);
+      setIsSessionReady(true);
       await refreshStats();
       if (token && isMounted) syncNow().catch(() => {});
     })();
@@ -457,6 +600,9 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         lastSyncedAt,
         syncNow,
         isSignedIn,
+        isSessionReady,
+        isOfflineMode,
+        setOfflineMode,
         farm,
         isSessionExpired,
         error,
@@ -466,6 +612,9 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         register,
         verifyOtp,
         resendOtp,
+        forgotPassword,
+        resetPassword,
+        changePassword,
         signOut,
       }}>
       {children}

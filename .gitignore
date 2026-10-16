@@ -41,3 +41,15 @@ example
 # generated native folders
 /ios
 /android
+
+# env (keep .env.example tracked)
+.env
+.env.local
+.env.*.local
+
+# EAS / credentials
+credentials.json
+google-service-account*.json
+
+# logs
+*.log

@@ -127,7 +127,11 @@ export function AppIcon({ name, size = 20, color, style }: AppIconProps) {
     }
   };
 
-  return <View style={style}>{renderIcon()}</View>;
+  return (
+    <View style={style} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+      {renderIcon()}
+    </View>
+  );
 }
 
 // ==========================================
@@ -179,6 +183,8 @@ export function IconBubble({
 
   return (
     <View
+      accessibilityElementsHidden={Boolean(icon)}
+      importantForAccessibility={icon ? 'no-hide-descendants' : 'auto'}
       style={[
         styles.bubbleBase,
         {

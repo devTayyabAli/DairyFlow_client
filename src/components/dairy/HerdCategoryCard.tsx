@@ -59,6 +59,7 @@ function HerdCategoryGridBase({
           <Pressable
             key={item.key}
             accessibilityRole="button"
+            accessibilityLabel={item.name}
             accessibilityState={{ selected }}
             onPress={() => onSelectCategory?.(selected ? 'All' : item.key)}
             style={({ pressed }) => [

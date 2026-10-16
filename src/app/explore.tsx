@@ -13,9 +13,6 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { exportMilkEntriesToCsv } from '@/utils/csv-export';
-import { saveContentToCache, shareExportFile } from '@/utils/file-storage';
-
 import { AddMilkEntryModal } from '@/components/dairy/AddMilkEntryModal';
 import { MilkEntryCard } from '@/components/dairy/MilkEntryCard';
 import { ThemedText } from '@/components/themed-text';
@@ -43,7 +40,11 @@ import {
   ShiftType,
   updateMilkEntry,
 } from '@/db/database';
+import { useReportBrand } from '@/hooks/use-report-brand';
 import { useTheme } from '@/hooks/use-theme';
+import { logger } from '@/utils/logger';
+import { exportPdf } from '@/utils/pdf-export';
+import { buildMilkSalesReportHtml, reportFileName } from '@/utils/pdf-report';
 
 type DatePreset = 'all' | 'today' | 'yesterday' | 'week' | 'month' | 'custom';
 type ShiftFilter = ShiftType | 'All';
@@ -136,6 +137,7 @@ export default function ExploreScreen() {
   const db = useSQLiteContext();
   const theme = useTheme();
   const { isUrdu } = useLanguage();
+  const { brand, lang } = useReportBrand();
 
   // Data
   const [entries, setEntries] = useState<MilkEntry[]>([]);
@@ -149,7 +151,7 @@ export default function ExploreScreen() {
   const [isEntryModalOpen, setIsEntryModalOpen] = useState(false);
   const [entryToEdit, setEntryToEdit] = useState<MilkEntry | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  const [exportingCsv, setExportingCsv] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   // Filters
   const [searchInput, setSearchInput] = useState('');
@@ -229,7 +231,7 @@ export default function ExploreScreen() {
         });
         if (active) setEntries(list);
       } catch (error) {
-        console.error('Failed to load records:', error);
+        logger.error('Failed to load records:', error);
       } finally {
         if (active) {
           setLoading(false);
@@ -253,7 +255,7 @@ export default function ExploreScreen() {
           setDefaultBuyer(def);
         }
       } catch (error) {
-        console.error('Failed to load buyers:', error);
+        logger.error('Failed to load buyers:', error);
       }
     })();
     return () => {
@@ -351,41 +353,66 @@ export default function ExploreScreen() {
     setCustomEndDate('');
   }, []);
 
-  const handleExportCsv = useCallback(async () => {
-    if (exportingCsv) return;
+  // PDF report for the active filters (e.g. "This month" gives a monthly milk sales report).
+  const handleExportPdf = useCallback(async () => {
+    if (exporting) return;
     try {
-      setExportingCsv(true);
+      setExporting(true);
       if (entries.length === 0) {
         Alert.alert(
           isUrdu ? 'کوئی ریکارڈ نہیں' : 'No milk records',
           isUrdu
-            ? 'موجودہ فلٹر وچ ایکسپورٹ لئی کوئی ریکارڈ نہیں۔'
-            : 'There are no records matching your current filter to export.',
+            ? 'موجودہ فلٹر وچ رپورٹ لئی کوئی ریکارڈ نہیں۔'
+            : 'There are no records matching your current filter to put in a report.',
           [{ text: 'OK' }]
         );
         return;
       }
-      const csv = exportMilkEntriesToCsv(entries);
-      const saved = await saveContentToCache(`dairyflow_milk_records_${todayStr}.csv`, csv);
-      const shared = await shareExportFile(saved.uri, {
-        mimeType: 'text/csv',
-        dialogTitle: 'Export Milk Records (CSV)',
+
+      // The list is capped for speed; the report must contain every matching record.
+      const all = await getFilteredEntries(db, {
+        startDate,
+        endDate,
+        shift: shiftFilter,
+        searchQuery: searchQuery.trim() || undefined,
+        limit: 10000,
       });
+
+      const preset = DATE_PRESETS.find((p) => p.key === datePreset);
+      const periodLabel = isUrdu ? preset?.ur ?? '' : preset?.en ?? '';
+      const html = buildMilkSalesReportHtml({
+        brand,
+        lang,
+        entries: all,
+        periodLabel,
+        startDate,
+        endDate,
+      });
+      const shared = await exportPdf(
+        html,
+        reportFileName(`milk_sales_${datePreset}`, startDate ?? all[0]?.date, endDate ?? all[all.length - 1]?.date),
+        isUrdu ? 'دودھ دی فروخت رپورٹ' : 'Milk sales report'
+      );
       showToast(
         shared
-          ? `Exported ${entries.length} milk records to CSV.`
-          : `Saved to cache: ${saved.filename}`
+          ? isUrdu
+            ? 'PDF رپورٹ تیار اے'
+            : `PDF report ready (${all.length} records)`
+          : isUrdu
+            ? 'اس ڈیوائس تے شیئرنگ دستیاب نہیں'
+            : 'Sharing is not available on this device'
       );
     } catch (err) {
+      logger.error('Failed to create milk sales PDF:', err);
       Alert.alert(
-        'Export Failed',
-        err instanceof Error ? err.message : 'Unable to generate CSV file.',
+        isUrdu ? 'PDF نہیں بن سکی' : 'Could not create PDF',
+        err instanceof Error ? err.message : isUrdu ? 'دوبارہ کوشش کرو۔' : 'Please try again.',
         [{ text: 'OK' }]
       );
     } finally {
-      setExportingCsv(false);
+      setExporting(false);
     }
-  }, [entries, exportingCsv, isUrdu, showToast, todayStr]);
+  }, [brand, datePreset, db, endDate, entries.length, exporting, isUrdu, lang, searchQuery, shiftFilter, showToast, startDate]);
 
   // Derived data
   const summary = useMemo(() => {
@@ -606,19 +633,20 @@ export default function ExploreScreen() {
           ) : null}
           <LanguageToggleButton />
           <Pressable
-            onPress={handleExportCsv}
-            disabled={exportingCsv}
+            onPress={handleExportPdf}
+            disabled={exporting}
             accessibilityRole="button"
-            accessibilityLabel="Export milk records to CSV"
+            accessibilityLabel={isUrdu ? 'PDF رپورٹ بناؤ' : 'Export milk report as PDF'}
+            accessibilityState={{ busy: exporting, disabled: exporting }}
             style={({ pressed }) => [
               styles.iconBtn,
               { backgroundColor: theme.card, borderColor: theme.border },
               pressed && styles.pressed,
             ]}>
-            {exportingCsv ? (
+            {exporting ? (
               <ActivityIndicator size="small" color={theme.primary} />
             ) : (
-              <AppIcon name="share" size={17} color={theme.textSecondary} />
+              <AppIcon name="print" size={17} color={theme.textSecondary} />
             )}
           </Pressable>
         </View>

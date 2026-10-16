@@ -44,6 +44,8 @@ import {
   NewLivestockAnimal,
 } from '@/db/database';
 import { useTheme } from '@/hooks/use-theme';
+import { genderLabel, type HerdLang, speciesLabel, statusLabel } from '@/utils/herd-labels';
+import { logger } from '@/utils/logger';
 
 const EMPTY_SUMMARY: LivestockSummary = {
   totalAnimals: 0,
@@ -62,6 +64,7 @@ const EMPTY_SUMMARY: LivestockSummary = {
 // ---------------------------------------------------------------------------
 interface AnimalRowProps {
   animal: LivestockAnimal;
+  lang: HerdLang;
   farmBredLabel: string;
   removeLabel: string;
   onDelete: (animal: LivestockAnimal) => void;
@@ -69,6 +72,7 @@ interface AnimalRowProps {
 
 const AnimalRow = memo(function AnimalRow({
   animal,
+  lang,
   farmBredLabel,
   removeLabel,
   onDelete,
@@ -83,10 +87,10 @@ const AnimalRow = memo(function AnimalRow({
       </View>
       <View style={styles.animalMeta}>
         <ThemedText style={styles.animalName} numberOfLines={1}>
-          {animal.name || `${animal.species} (${animal.breed || farmBredLabel})`}
+          {animal.name || `${speciesLabel(animal.species, lang)} (${animal.breed || farmBredLabel})`}
         </ThemedText>
         <ThemedText style={[styles.animalSubtext, { color: theme.textSecondary }]} numberOfLines={1}>
-          {animal.species} · {animal.gender} · {animal.status}
+          {speciesLabel(animal.species, lang)} · {genderLabel(animal.gender, lang)} · {statusLabel(animal.status, lang)}
         </ThemedText>
       </View>
       <Pressable
@@ -148,7 +152,7 @@ export default function LivestockScreen() {
       setActivities(acts);
       setAnimals(anims);
     } catch (err) {
-      console.error('Failed to load livestock data:', err);
+      logger.error('Failed to load livestock data:', err);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -194,7 +198,7 @@ export default function LivestockScreen() {
       Alert.alert(
         isUrdu ? 'جانور ہٹاؤ' : 'Remove animal',
         isUrdu
-          ? `کی تسیں جانور ${animal.tag_number} (${animal.species}) نوں ریوڑ وچوں ہٹانا چاہندے او؟`
+          ? `کی تسیں جانور ${animal.tag_number} (${speciesLabel(animal.species, 'ur')}) نوں ریوڑ وچوں ہٹانا چاہندے او؟`
           : `Are you sure you want to remove animal ${animal.tag_number} (${animal.species}) from the herd?`,
         [
           { text: isUrdu ? 'منسوخ' : 'Cancel', style: 'cancel' },
@@ -222,7 +226,10 @@ export default function LivestockScreen() {
         a.tag_number.toLowerCase().includes(q) ||
         (a.name ? a.name.toLowerCase().includes(q) : false) ||
         (a.breed ? a.breed.toLowerCase().includes(q) : false) ||
-        a.status.toLowerCase().includes(q)
+        a.status.toLowerCase().includes(q) ||
+        // searching works in either language, whichever one the list is displayed in
+        statusLabel(a.status, 'ur').includes(q) ||
+        speciesLabel(a.species, 'ur').includes(q)
       );
     });
   }, [animals, selectedCategory, searchQuery]);
@@ -256,12 +263,13 @@ export default function LivestockScreen() {
     ({ item }: { item: LivestockAnimal }) => (
       <AnimalRow
         animal={item}
+        lang={isUrdu ? 'ur' : 'en'}
         farmBredLabel={farmBredLabel}
         removeLabel={removeLabel}
         onDelete={handleDeleteAnimal}
       />
     ),
-    [farmBredLabel, handleDeleteAnimal, removeLabel]
+    [farmBredLabel, handleDeleteAnimal, isUrdu, removeLabel]
   );
 
   const keyExtractor = useCallback((item: LivestockAnimal) => String(item.id), []);

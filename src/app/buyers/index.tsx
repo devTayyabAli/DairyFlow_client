@@ -21,6 +21,7 @@ import { useAdmin } from '@/context/admin-context';
 import { useLanguage } from '@/context/language-context';
 import { addBuyer, BuyerOverviewItem, deleteBuyer, getBuyersOverview } from '@/db/database';
 import { useTheme } from '@/hooks/use-theme';
+import { logger } from '@/utils/logger';
 
 type BuyerFilter = 'all' | 'balance' | 'settled';
 
@@ -52,7 +53,7 @@ export default function BuyersDirectoryScreen() {
       const data = await getBuyersOverview(db);
       setBuyersOverview(data);
     } catch (err) {
-      console.error('Failed to load buyers overview:', err);
+      logger.error('Failed to load buyers overview:', err);
     } finally {
       setLoaded(true);
       setRefreshing(false);

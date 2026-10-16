@@ -14,9 +14,6 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { exportExpensesToCsv } from '@/utils/csv-export';
-import { saveContentToCache, shareExportFile } from '@/utils/file-storage';
-
 import { AddExpenseModal } from '@/components/dairy/AddExpenseModal';
 import { ExpenseCard } from '@/components/dairy/ExpenseCard';
 import { ThemedText } from '@/components/themed-text';
@@ -40,7 +37,11 @@ import {
   getOperatingFinancialReport,
   OperatingFinancialReport,
 } from '@/db/database';
+import { useReportBrand } from '@/hooks/use-report-brand';
 import { useTheme } from '@/hooks/use-theme';
+import { logger } from '@/utils/logger';
+import { exportPdf } from '@/utils/pdf-export';
+import { buildExpenseReportHtml, reportFileName } from '@/utils/pdf-report';
 
 type DatePreset = 'week' | 'today' | 'yesterday' | 'month' | 'all' | 'custom';
 type CategoryFilter = ExpenseCategory | 'All' | 'OtherGroup';
@@ -65,6 +66,7 @@ export default function ExpensesScreen() {
   const db = useSQLiteContext();
   const theme = useTheme();
   const { isUrdu } = useLanguage();
+  const { brand, lang } = useReportBrand();
 
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [summary, setSummary] = useState<ExpenseSummary | null>(null);
@@ -76,7 +78,7 @@ export default function ExpensesScreen() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [expenseToEdit, setExpenseToEdit] = useState<Expense | null>(null);
   const [feedbackToast, setFeedbackToast] = useState<string | null>(null);
-  const [exportingCsv, setExportingCsv] = useState<boolean>(false);
+  const [exporting, setExporting] = useState<boolean>(false);
 
   const [datePreset, setDatePreset] = useState<DatePreset>('week');
   const [customStartDate, setCustomStartDate] = useState('');
@@ -96,8 +98,6 @@ export default function ExpensesScreen() {
     },
     []
   );
-
-  const todayStr = formatLocalDate(new Date());
 
   const dateBounds = useMemo<{ startDate?: string; endDate?: string }>(() => {
     const now = new Date();
@@ -181,7 +181,7 @@ export default function ExpensesScreen() {
         setSummary(expenseSummary);
         setFinancialReport(opReport);
       } catch (error) {
-        if (isSubscribed) console.error('Failed to load expenses:', error);
+        if (isSubscribed) logger.error('Failed to load expenses:', error);
       } finally {
         if (isSubscribed) {
           setLoading(false);
@@ -267,39 +267,76 @@ export default function ExpensesScreen() {
     customStartDate !== '' ||
     customEndDate !== '';
 
-  const handleExportCsv = useCallback(async () => {
-    if (exportingCsv) return;
+  // PDF report for the active filters (e.g. "This month" gives a monthly expense report).
+  const handleExportPdf = useCallback(async () => {
+    if (exporting) return;
     try {
-      setExportingCsv(true);
+      setExporting(true);
       if (expenses.length === 0) {
         Alert.alert(
-          'No Expenses',
-          'There are no expense records matching your current filter to export.',
+          isUrdu ? 'کوئی خرچہ نہیں' : 'No expenses',
+          isUrdu
+            ? 'موجودہ فلٹر وچ رپورٹ لئی کوئی خرچہ نہیں۔'
+            : 'There are no expenses matching your current filter to put in a report.',
           [{ text: 'OK' }]
         );
         return;
       }
-      const csv = exportExpensesToCsv(expenses);
-      const saved = await saveContentToCache(`dairyflow_expenses_${todayStr}.csv`, csv);
-      const shared = await shareExportFile(saved.uri, {
-        mimeType: 'text/csv',
-        dialogTitle: 'Export Farm Expenses (CSV)',
+
+      // The list is capped for speed; the report must contain every matching expense.
+      const dbCategory =
+        selectedCategory === 'All' || selectedCategory === 'OtherGroup' ? undefined : selectedCategory;
+      const fullList = await getFilteredExpenses(db, {
+        startDate: dateBounds.startDate,
+        endDate: dateBounds.endDate,
+        category: dbCategory,
+        searchQuery: searchQuery.trim() || undefined,
+        limit: 10000,
       });
+      const all = selectedCategory === 'OtherGroup' ? fullList.filter((e) => e.category !== 'Feed') : fullList;
+
+      const presetLabels: Record<DatePreset, [string, string]> = {
+        week: ['This week', 'اس ہفتے'],
+        today: ['Today', 'اج'],
+        yesterday: ['Yesterday', 'کل'],
+        month: ['This month', 'اس مہینے'],
+        all: ['All time', 'سارا وقت'],
+        custom: ['Custom period', 'مرضی دی مدت'],
+      };
+      const html = buildExpenseReportHtml({
+        brand,
+        lang,
+        expenses: all,
+        periodLabel: presetLabels[datePreset][isUrdu ? 1 : 0],
+        startDate: dateBounds.startDate,
+        endDate: dateBounds.endDate,
+        categoryFilter: selectedCategory === 'OtherGroup' ? 'Other' : selectedCategory,
+      });
+      const shared = await exportPdf(
+        html,
+        reportFileName(`expenses_${datePreset}`, dateBounds.startDate ?? all[0]?.date, dateBounds.endDate ?? all[all.length - 1]?.date),
+        isUrdu ? 'اخراجات رپورٹ' : 'Expense report'
+      );
       showToast(
         shared
-          ? `Exported ${expenses.length} expense records to CSV.`
-          : `Saved to cache: ${saved.filename}`
+          ? isUrdu
+            ? 'PDF رپورٹ تیار اے'
+            : `PDF report ready (${all.length} expenses)`
+          : isUrdu
+            ? 'اس ڈیوائس تے شیئرنگ دستیاب نہیں'
+            : 'Sharing is not available on this device'
       );
     } catch (err) {
+      logger.error('Failed to create expense PDF:', err);
       Alert.alert(
-        'Export Failed',
-        err instanceof Error ? err.message : 'Unable to generate expenses CSV file.',
+        isUrdu ? 'PDF نہیں بن سکی' : 'Could not create PDF',
+        err instanceof Error ? err.message : isUrdu ? 'دوبارہ کوشش کرو۔' : 'Please try again.',
         [{ text: 'OK' }]
       );
     } finally {
-      setExportingCsv(false);
+      setExporting(false);
     }
-  }, [exportingCsv, expenses, showToast, todayStr]);
+  }, [brand, datePreset, dateBounds.endDate, dateBounds.startDate, db, expenses.length, exporting, isUrdu, lang, searchQuery, selectedCategory, showToast]);
 
   const handleBack = useCallback(() => {
     if (router.canGoBack()) router.back();
@@ -568,20 +605,21 @@ export default function ExpensesScreen() {
           </ThemedText>
         </View>
         <Pressable
-          onPress={handleExportCsv}
-          disabled={exportingCsv}
+          onPress={handleExportPdf}
+          disabled={exporting}
           hitSlop={6}
           accessibilityRole="button"
-          accessibilityLabel="Export expenses to CSV"
+          accessibilityLabel={isUrdu ? 'PDF رپورٹ بناؤ' : 'Export expense report as PDF'}
+          accessibilityState={{ busy: exporting, disabled: exporting }}
           style={({ pressed }) => [
             styles.iconBtn,
             { backgroundColor: theme.card, borderColor: theme.border },
             pressed && styles.pressed,
           ]}>
-          {exportingCsv ? (
+          {exporting ? (
             <ActivityIndicator size="small" color={theme.primary} />
           ) : (
-            <AppIcon name="share" size={18} color={theme.text} />
+            <AppIcon name="print" size={18} color={theme.text} />
           )}
         </Pressable>
       </View>

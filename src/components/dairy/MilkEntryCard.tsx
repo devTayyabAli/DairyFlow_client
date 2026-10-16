@@ -59,20 +59,20 @@ function MilkEntryCardBase({ entry, onDelete, onEdit, currencySymbol = 'Rs' }: M
           {onEdit ? (
             <Pressable
               onPress={() => onEdit(entry)}
-              hitSlop={10}
+              hitSlop={14}
               accessibilityRole="button"
-              accessibilityLabel="Edit entry"
+              accessibilityLabel={isUrdu ? 'اندراج میں ترمیم کریں' : 'Edit entry'}
               style={styles.actionBtn}>
-              <Ionicons name="pencil-outline" size={17} color={theme.textSecondary} />
+              <Ionicons accessibilityElementsHidden importantForAccessibility="no" name="pencil-outline" size={17} color={theme.textSecondary} />
             </Pressable>
           ) : null}
           <Pressable
             onPress={handleDeletePress}
-            hitSlop={10}
+            hitSlop={14}
             accessibilityRole="button"
-            accessibilityLabel="Delete entry"
+            accessibilityLabel={isUrdu ? 'اندراج حذف کریں' : 'Delete entry'}
             style={styles.actionBtn}>
-            <Ionicons name="trash-outline" size={17} color={theme.danger} />
+            <Ionicons accessibilityElementsHidden importantForAccessibility="no" name="trash-outline" size={17} color={theme.danger} />
           </Pressable>
         </View>
       </View>

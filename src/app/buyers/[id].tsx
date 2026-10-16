@@ -33,6 +33,7 @@ import {
 } from '@/db/database';
 import { useTheme } from '@/hooks/use-theme';
 import { getFridayToThursdayWeek } from '@/utils/week-cycle';
+import { logger } from '@/utils/logger';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -168,7 +169,7 @@ export default function BuyerLedgerScreen() {
       const data = await getBuyerLedger(db, buyerId, startDate, endDate);
       setLedger(data);
     } catch (err) {
-      console.error('Failed to load buyer ledger:', err);
+      logger.error('Failed to load buyer ledger:', err);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -244,7 +245,7 @@ export default function BuyerLedgerScreen() {
         ]
       );
     } catch (err: any) {
-      console.error('Failed to delete buyer:', err);
+      logger.error('Failed to delete buyer:', err);
       Alert.alert(
         isUrdu ? 'خرابی' : 'Error',
         err?.message || (isUrdu ? 'گاہک حذف کرنے میں ناکامی ہوئی' : 'Failed to delete buyer')

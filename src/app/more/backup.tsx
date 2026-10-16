@@ -55,6 +55,7 @@ import {
   restoreAllDataFromBackup,
   RestoreResult,
 } from '@/db/database';
+import { useReportBrand } from '@/hooks/use-report-brand';
 import { useTheme } from '@/hooks/use-theme';
 import {
   DairyFlowBackupEnvelope,
@@ -62,16 +63,19 @@ import {
   serializeBackupToJson,
 } from '@/utils/backup-restore';
 import {
-  exportBuyersToCsv,
-  exportExpensesToCsv,
-  exportMilkEntriesToCsv,
-} from '@/utils/csv-export';
-import {
   pickBackupDocument,
   readBackupFile,
   saveContentToCache,
   shareExportFile,
 } from '@/utils/file-storage';
+import { logger } from '@/utils/logger';
+import { exportPdf } from '@/utils/pdf-export';
+import {
+  buildBuyersDirectoryHtml,
+  buildExpenseReportHtml,
+  buildMilkSalesReportHtml,
+  reportFileName,
+} from '@/utils/pdf-report';
 
 interface LiveDbStats {
   buyersCount: number;
@@ -86,6 +90,7 @@ export default function BackupScreen() {
   const db = useSQLiteContext();
   const theme = useTheme();
   const { isUrdu } = useLanguage();
+  const { brand, lang } = useReportBrand();
 
   // Multi-Farm Admin Profile from context
   const {
@@ -199,7 +204,7 @@ export default function BackupScreen() {
         totalExpenses: Math.round(totalExpenses),
       });
     } catch (err) {
-      console.error('Failed to load database stats:', err);
+      logger.error('Failed to load database stats:', err);
     } finally {
       setLoadingStats(false);
       setRefreshing(false);
@@ -217,19 +222,31 @@ export default function BackupScreen() {
     loadDatabaseStats();
   }, [loadDatabaseStats]);
 
-  // Current date helper (YYYY-MM-DD)
-  const getTodayDateStr = () => {
-    const d = new Date();
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
+  // -------------------------------------------------------------------------
+  // A. PDF REPORTS (all-time)
+  // -------------------------------------------------------------------------
+  const finishPdf = (shared: boolean, count: number, noun: string) => {
+    showToast(
+      shared
+        ? isUrdu
+          ? 'PDF رپورٹ تیار اے'
+          : `PDF report ready (${count} ${noun})`
+        : isUrdu
+          ? 'اس ڈیوائس تے شیئرنگ دستیاب نہیں'
+          : 'Sharing is not available on this device'
+    );
   };
 
-  // -------------------------------------------------------------------------
-  // A. CSV EXPORTS
-  // -------------------------------------------------------------------------
-  const handleExportMilkCsv = async () => {
+  const pdfFailed = (err: unknown) => {
+    logger.error('Failed to create PDF report:', err);
+    Alert.alert(
+      isUrdu ? 'PDF نہیں بن سکی' : 'Could not create PDF',
+      err instanceof Error ? err.message : isUrdu ? 'دوبارہ کوشش کرو۔' : 'Please try again.',
+      [{ text: 'OK' }]
+    );
+  };
+
+  const handleExportMilkPdf = async () => {
     if (exportingMilk) return;
     try {
       setExportingMilk(true);
@@ -239,39 +256,33 @@ export default function BackupScreen() {
 
       if (entries.length === 0) {
         Alert.alert(
-          'No Milk Records',
-          'There are currently no recorded milk collection entries to export.',
+          isUrdu ? 'کوئی ریکارڈ نہیں' : 'No milk records',
+          isUrdu ? 'رپورٹ لئی کوئی دودھ دا ریکارڈ نہیں۔' : 'There are no recorded milk sales to put in a report.',
           [{ text: 'OK' }]
         );
         return;
       }
 
-      const csvContent = exportMilkEntriesToCsv(entries);
-      const filename = `dairyflow_milk_records_${getTodayDateStr()}.csv`;
-      const saved = await saveContentToCache(filename, csvContent);
-
-      const shared = await shareExportFile(saved.uri, {
-        mimeType: 'text/csv',
-        dialogTitle: 'Export Milk Records (CSV)',
+      const html = buildMilkSalesReportHtml({
+        brand,
+        lang,
+        entries,
+        periodLabel: isUrdu ? 'سارا وقت' : 'All time',
       });
-
-      if (shared) {
-        showToast(`Exported ${entries.length} milk records to CSV.`);
-      } else {
-        showToast(`CSV saved to cache: ${saved.filename}`);
-      }
-    } catch (err) {
-      Alert.alert(
-        'Export Failed',
-        err instanceof Error ? err.message : 'Unable to generate milk records CSV.',
-        [{ text: 'OK' }]
+      const shared = await exportPdf(
+        html,
+        reportFileName('milk_sales_all', entries[entries.length - 1].date, entries[0].date),
+        isUrdu ? 'دودھ دی فروخت رپورٹ' : 'Milk sales report'
       );
+      finishPdf(shared, entries.length, 'records');
+    } catch (err) {
+      pdfFailed(err);
     } finally {
       setExportingMilk(false);
     }
   };
 
-  const handleExportBuyersCsv = async () => {
+  const handleExportBuyersPdf = async () => {
     if (exportingBuyers) return;
     try {
       setExportingBuyers(true);
@@ -279,73 +290,57 @@ export default function BackupScreen() {
 
       if (buyersWithStats.length === 0) {
         Alert.alert(
-          'No Buyers Registered',
-          'There are currently no registered buyers to export.',
+          isUrdu ? 'کوئی گاہک نہیں' : 'No buyers registered',
+          isUrdu ? 'رپورٹ لئی کوئی گاہک نہیں۔' : 'There are no registered buyers to put in a report.',
           [{ text: 'OK' }]
         );
         return;
       }
 
-      const csvContent = exportBuyersToCsv(buyersWithStats);
-      const filename = `dairyflow_buyers_directory_${getTodayDateStr()}.csv`;
-      const saved = await saveContentToCache(filename, csvContent);
-
-      const shared = await shareExportFile(saved.uri, {
-        mimeType: 'text/csv',
-        dialogTitle: 'Export Buyers Directory (CSV)',
-      });
-
-      if (shared) {
-        showToast(`Exported ${buyersWithStats.length} buyers to CSV.`);
-      } else {
-        showToast(`CSV saved to cache: ${saved.filename}`);
-      }
-    } catch (err) {
-      Alert.alert(
-        'Export Failed',
-        err instanceof Error ? err.message : 'Unable to generate buyers CSV.',
-        [{ text: 'OK' }]
+      const html = buildBuyersDirectoryHtml({ brand, lang, buyers: buyersWithStats });
+      const shared = await exportPdf(
+        html,
+        reportFileName('buyers_directory'),
+        isUrdu ? 'گاہکاں دی فہرست' : 'Buyers directory'
       );
+      finishPdf(shared, buyersWithStats.length, 'buyers');
+    } catch (err) {
+      pdfFailed(err);
     } finally {
       setExportingBuyers(false);
     }
   };
 
-  const handleExportExpensesCsv = async () => {
+  const handleExportExpensesPdf = async () => {
     if (exportingExpenses) return;
     try {
       setExportingExpenses(true);
-      const expenses = await getFilteredExpenses(db, {});
+      const expenses = await getFilteredExpenses(db, { limit: 10000 });
 
       if (expenses.length === 0) {
         Alert.alert(
-          'No Expenses Recorded',
-          'There are currently no recorded farm expenses to export.',
+          isUrdu ? 'کوئی خرچہ نہیں' : 'No expenses recorded',
+          isUrdu ? 'رپورٹ لئی کوئی خرچہ نہیں۔' : 'There are no recorded farm expenses to put in a report.',
           [{ text: 'OK' }]
         );
         return;
       }
 
-      const csvContent = exportExpensesToCsv(expenses);
-      const filename = `dairyflow_expenses_${getTodayDateStr()}.csv`;
-      const saved = await saveContentToCache(filename, csvContent);
-
-      const shared = await shareExportFile(saved.uri, {
-        mimeType: 'text/csv',
-        dialogTitle: 'Export Farm Expenses (CSV)',
+      const sorted = [...expenses].sort((a, b) => (a.date < b.date ? -1 : 1));
+      const html = buildExpenseReportHtml({
+        brand,
+        lang,
+        expenses,
+        periodLabel: isUrdu ? 'سارا وقت' : 'All time',
       });
-
-      if (shared) {
-        showToast(`Exported ${expenses.length} expense records to CSV.`);
-      } else {
-        showToast(`CSV saved to cache: ${saved.filename}`);
-      }
-    } catch (err) {
-      Alert.alert(
-        'Export Failed',
-        err instanceof Error ? err.message : 'Unable to generate expenses CSV.',
-        [{ text: 'OK' }]
+      const shared = await exportPdf(
+        html,
+        reportFileName('expenses_all', sorted[0].date, sorted[sorted.length - 1].date),
+        isUrdu ? 'اخراجات رپورٹ' : 'Expense report'
       );
+      finishPdf(shared, expenses.length, 'expenses');
+    } catch (err) {
+      pdfFailed(err);
     } finally {
       setExportingExpenses(false);
     }
@@ -618,6 +613,8 @@ export default function BackupScreen() {
             <Pressable
               onPress={onRefresh}
               disabled={loadingStats}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: loadingStats }}
               style={({ pressed }) => [
                 styles.refreshBtn,
                 { backgroundColor: theme.backgroundElement },
@@ -666,15 +663,17 @@ export default function BackupScreen() {
         </AppCard>
 
         {/* ========================================================= */}
-        {/* 2. CSV EXPORTS SECTION                                    */}
+        {/* 2. PDF REPORTS SECTION                                    */}
         {/* ========================================================= */}
         <AppCard style={styles.sectionCard}>
           <View style={styles.cardTitleWrap}>
             <IconBubble icon="chart" variant="mint" size={34} iconSize={18} />
             <View style={{ flex: 1 }}>
-              <ThemedText style={styles.sectionTitle}>Spreadsheet Exports (CSV)</ThemedText>
+              <ThemedText style={styles.sectionTitle}>{isUrdu ? 'پرنٹ ایبل رپورٹیں (PDF)' : 'Printable Reports (PDF)'}</ThemedText>
               <ThemedText style={[styles.sectionSubtitle, { color: theme.textSecondary }]}>
-                UTF-8 with Excel BOM & formula injection defense. Ideal for Microsoft Excel, Google Sheets, or Apple Numbers.
+                {isUrdu
+                  ? 'پیشہ ورانہ PDF رپورٹاں، شیئر یا پرنٹ کرن لئی۔'
+                  : 'Professional PDF reports to share, print or send to your accountant.'}
               </ThemedText>
             </View>
           </View>
@@ -683,57 +682,57 @@ export default function BackupScreen() {
             {/* Export Milk Entries */}
             <View style={[styles.actionRow, { borderColor: theme.border }]}>
               <View style={styles.actionInfo}>
-                <ThemedText style={styles.actionTitle}>Milk Collection Records</ThemedText>
+                <ThemedText style={styles.actionTitle}>{isUrdu ? 'دودھ دی فروخت رپورٹ' : 'Milk Sales Report'}</ThemedText>
                 <ThemedText style={[styles.actionDescription, { color: theme.textSecondary }]}>
-                  {stats.milkEntriesCount} records · Date, shift, fat, liters, rates, and amounts
+                  {stats.milkEntriesCount} {isUrdu ? 'ریکارڈ' : 'records'} · {isUrdu ? 'تاریخ، شفٹ، لیٹر، ریٹ، رقم' : 'by date, buyer and shift with totals'}
                 </ThemedText>
               </View>
               <AppButton
-                title={exportingMilk ? 'Exporting...' : 'Export'}
+                title={exportingMilk ? (isUrdu ? 'بن رہی اے...' : 'Creating...') : 'PDF'}
                 variant="secondary"
                 size="sm"
                 icon={<AppIcon name="milk" size={14} color={theme.primaryDark} />}
                 loading={exportingMilk}
                 disabled={anyLoading}
-                onPress={handleExportMilkCsv}
+                onPress={handleExportMilkPdf}
               />
             </View>
 
             {/* Export Buyers Directory */}
             <View style={[styles.actionRow, { borderColor: theme.border }]}>
               <View style={styles.actionInfo}>
-                <ThemedText style={styles.actionTitle}>Buyers Directory</ThemedText>
+                <ThemedText style={styles.actionTitle}>{isUrdu ? 'گاہکاں دی فہرست' : 'Buyers Directory'}</ThemedText>
                 <ThemedText style={[styles.actionDescription, { color: theme.textSecondary }]}>
-                  {stats.buyersCount} buyers · Contact details, defaults, and lifetime totals
+                  {stats.buyersCount} {isUrdu ? 'گاہک' : 'buyers'} · {isUrdu ? 'رابطہ تے کل فروخت' : 'contact details and lifetime totals'}
                 </ThemedText>
               </View>
               <AppButton
-                title={exportingBuyers ? 'Exporting...' : 'Export'}
+                title={exportingBuyers ? (isUrdu ? 'بن رہی اے...' : 'Creating...') : 'PDF'}
                 variant="secondary"
                 size="sm"
                 icon={<AppIcon name="user" size={14} color={theme.primaryDark} />}
                 loading={exportingBuyers}
                 disabled={anyLoading}
-                onPress={handleExportBuyersCsv}
+                onPress={handleExportBuyersPdf}
               />
             </View>
 
             {/* Export Expenses */}
             <View style={[styles.actionRow, { borderColor: theme.border }]}>
               <View style={styles.actionInfo}>
-                <ThemedText style={styles.actionTitle}>Farm Operating Expenses</ThemedText>
+                <ThemedText style={styles.actionTitle}>{isUrdu ? 'اخراجات رپورٹ' : 'Expense Report'}</ThemedText>
                 <ThemedText style={[styles.actionDescription, { color: theme.textSecondary }]}>
-                  {stats.expensesCount} expenses · Feed, labour, vet care, fuel, utilities
+                  {stats.expensesCount} {isUrdu ? 'اخراجات' : 'expenses'} · {isUrdu ? 'ونڈا، مزدوری، ڈاکٹر، ایندھن' : 'feed, labour, vet care, fuel and more'}
                 </ThemedText>
               </View>
               <AppButton
-                title={exportingExpenses ? 'Exporting...' : 'Export'}
+                title={exportingExpenses ? (isUrdu ? 'بن رہی اے...' : 'Creating...') : 'PDF'}
                 variant="secondary"
                 size="sm"
                 icon={<AppIcon name="feed" size={14} color={theme.primaryDark} />}
                 loading={exportingExpenses}
                 disabled={anyLoading}
-                onPress={handleExportExpensesCsv}
+                onPress={handleExportExpensesPdf}
               />
             </View>
           </View>
@@ -741,7 +740,9 @@ export default function BackupScreen() {
           <View style={[styles.noteBox, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}>
             <Ionicons name="information-circle-outline" size={18} color={theme.textSecondary} />
             <ThemedText style={[styles.noteText, { color: theme.textSecondary }]}>
-              Note: CSV exports are tabular reports for spreadsheets. They do not constitute a full relational database backup and cannot be used to restore the database.
+              {isUrdu
+                ? 'نوٹ: PDF رپورٹاں صرف پڑھن تے پرنٹ لئی نیں۔ ڈیٹا بحال کرن لئی نیچے دتا گیا مکمل بیک اپ (JSON) استعمال کرو۔'
+                : 'Note: PDF reports are for reading and printing. To restore your data, use the full backup (JSON) below.'}
             </ThemedText>
           </View>
         </AppCard>

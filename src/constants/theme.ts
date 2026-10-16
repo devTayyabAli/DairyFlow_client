@@ -33,7 +33,7 @@ export const Colors = {
     // Text & Typography
     text: '#141F18', // High contrast deep forest slate
     textSecondary: '#52665A', // Calming readable sage slate
-    textMuted: '#8FA095', // Placeholder & secondary cues
+    textMuted: '#5F7167', // Placeholder & secondary cues
     textInverse: '#FFFFFF',
 
     // Brand Primary (Emerald Green)
@@ -51,13 +51,13 @@ export const Colors = {
     eveningBorder: '#BFDBFE',
 
     // Status & Utility Accents
-    accent: '#D97706', // Alert / warning amber
+    accent: '#B45309', // Alert / warning amber
     accentBg: '#FFFBEB',
-    danger: '#DC2626',
+    danger: '#B91C1C',
     dangerBg: '#FEE2E2',
-    success: '#16A34A',
+    success: '#15803D',
     successBg: '#DCFCE7',
-    info: '#0284C7',
+    info: '#0369A1',
     infoBg: '#E0F2FE',
 
     // Interactive Chips & Tabs
@@ -94,7 +94,7 @@ export const Colors = {
     // Text & Typography
     text: '#F8FAFC',
     textSecondary: '#94A3B8',
-    textMuted: '#64748B',
+    textMuted: '#7C8CA3',
     textInverse: '#0D1711',
 
     // Brand Primary

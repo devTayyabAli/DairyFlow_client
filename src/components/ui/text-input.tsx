@@ -12,6 +12,9 @@ import {
 } from 'react-native';
 
 import { BorderRadius, Layout, Spacing, Typography } from '@/constants/theme';
+import { Ionicons } from '@expo/vector-icons';
+
+import { useLanguage } from '@/context/language-context';
 import { useTheme } from '@/hooks/use-theme';
 
 export interface AppTextInputProps extends TextInputProps {
@@ -23,6 +26,7 @@ export interface AppTextInputProps extends TextInputProps {
   rightIcon?: React.ReactNode;
   unitSuffix?: string; // e.g. "L", "%", "Rs / L"
   onRightIconPress?: () => void;
+  rightIconAccessibilityLabel?: string;
   containerStyle?: StyleProp<ViewStyle>;
   inputContainerStyle?: StyleProp<ViewStyle>;
   inputStyle?: StyleProp<TextStyle>;
@@ -39,6 +43,7 @@ export function AppTextInput({
   rightIcon,
   unitSuffix,
   onRightIconPress,
+  rightIconAccessibilityLabel,
   containerStyle,
   inputContainerStyle,
   inputStyle,
@@ -46,10 +51,15 @@ export function AppTextInput({
   onFocus,
   onBlur,
   testID,
+  secureTextEntry,
   ...rest
 }: AppTextInputProps) {
   const theme = useTheme();
+  const { isUrdu } = useLanguage();
   const [isFocused, setIsFocused] = useState(false);
+  // Password-style fields get a show/hide eye; plain fields are untouched.
+  const [revealed, setRevealed] = useState(false);
+  const isPassword = Boolean(secureTextEntry);
 
   const hasError = Boolean(error);
 
@@ -95,6 +105,7 @@ export function AppTextInput({
             inputStyle,
           ]}
           placeholderTextColor={theme.textMuted}
+          accessibilityLabel={label}
           onFocus={(e) => {
             setIsFocused(true);
             onFocus?.(e);
@@ -103,6 +114,7 @@ export function AppTextInput({
             setIsFocused(false);
             onBlur?.(e);
           }}
+          secureTextEntry={isPassword && !revealed}
           {...rest}
         />
 
@@ -114,10 +126,31 @@ export function AppTextInput({
           </View>
         ) : null}
 
+        {isPassword && !rightIcon ? (
+          <Pressable
+            onPress={() => setRevealed((v) => !v)}
+            accessibilityRole="button"
+            accessibilityLabel={
+              revealed ? (isUrdu ? 'پاس ورڈ چھپاؤ' : 'Hide password') : isUrdu ? 'پاس ورڈ دکھاؤ' : 'Show password'
+            }
+            accessibilityState={{ checked: revealed }}
+            hitSlop={10}
+            style={styles.rightIconWrap}>
+            <Ionicons
+              name={revealed ? 'eye-off-outline' : 'eye-outline'}
+              size={20}
+              color={theme.textSecondary}
+            />
+          </Pressable>
+        ) : null}
+
         {rightIcon ? (
           <Pressable
             onPress={onRightIconPress}
             disabled={!onRightIconPress}
+            accessibilityRole={onRightIconPress ? 'button' : undefined}
+            accessibilityLabel={rightIconAccessibilityLabel}
+            hitSlop={8}
             style={styles.rightIconWrap}>
             {rightIcon}
           </Pressable>

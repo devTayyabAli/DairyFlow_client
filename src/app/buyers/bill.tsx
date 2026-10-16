@@ -6,7 +6,6 @@ import {
   Alert,
   FlatList,
   Pressable,
-  Share,
   StyleSheet,
   View,
 } from 'react-native';
@@ -24,7 +23,11 @@ import {
   NewBuyerPayment,
   recordBuyerPayment,
 } from '@/db/database';
+import { useReportBrand } from '@/hooks/use-report-brand';
 import { useTheme } from '@/hooks/use-theme';
+import { logger } from '@/utils/logger';
+import { exportPdf } from '@/utils/pdf-export';
+import { buildBuyerBillHtml, reportFileName } from '@/utils/pdf-report';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -69,6 +72,8 @@ export default function WeeklyBuyerBillScreen() {
   const theme = useTheme();
   const db = useSQLiteContext();
   const { isUrdu } = useLanguage();
+  const { brand, lang } = useReportBrand();
+  const [exporting, setExporting] = useState(false);
   const params = useLocalSearchParams<{ buyerId?: string; startDate?: string; endDate?: string }>();
 
   const buyerId = parseInt(params.buyerId ?? '0', 10);
@@ -87,7 +92,7 @@ export default function WeeklyBuyerBillScreen() {
     try {
       setLedger(await getBuyerLedger(db, buyerId, startDate, endDate));
     } catch (err) {
-      console.error('Failed to load bill data:', err);
+      logger.error('Failed to load bill data:', err);
     } finally {
       setLoading(false);
     }
@@ -117,43 +122,36 @@ export default function WeeklyBuyerBillScreen() {
     [startDate, buyerInitials]
   );
 
-  const grossPayable = (ledger?.openingBalance ?? 0) + (ledger?.totalSalesAmount ?? 0);
   const netDue = ledger?.outstandingBalance ?? 0;
   const isSettled = netDue <= 0;
   const periodText = `${formatDay(startDate)} – ${formatDay(endDate, true)}`;
 
   const handleShareBill = useCallback(async () => {
-    if (!ledger) return;
-
-    let itemsText = '';
-    for (const entry of ledger.entries) {
-      itemsText += `• ${entry.date} (${entry.shift}): ${entry.liters} L @ Rs ${entry.rate_per_liter} = Rs ${entry.total_amount.toLocaleString()}\n`;
-    }
-
-    const message = `*DAIRYFLOW FARM — WEEKLY MILK BILL*
-Bill No: ${billNumber}
-Period: ${startDate} to ${endDate}
-Customer: ${ledger.buyer.name}
-Phone: ${ledger.buyer.phone ?? 'N/A'}
-
-*DELIVERIES SUMMARY:*
-${itemsText || 'No milk deliveries recorded in this period.'}
-Total Volume: ${ledger.totalSalesVolume} Liters
-Weekly Sales: Rs ${ledger.totalSalesAmount.toLocaleString()}
-Previous Balance: Rs ${ledger.openingBalance.toLocaleString()}
-Gross Payable: Rs ${grossPayable.toLocaleString()}
-Less Payments Received: Rs ${ledger.totalPaymentsReceived.toLocaleString()}
-
-*NET BALANCE DUE: Rs ${netDue.toLocaleString()}*
-
-Thank you for your business!`;
-
+    if (!ledger || exporting) return;
+    setExporting(true);
     try {
-      await Share.share({ message, title: `Milk Bill ${billNumber} - ${ledger.buyer.name}` });
+      const html = buildBuyerBillHtml({ brand, lang, ledger, billNumber, startDate, endDate });
+      const shared = await exportPdf(
+        html,
+        reportFileName(`bill_${ledger.buyer.name}`, startDate, endDate),
+        `${billNumber} · ${ledger.buyer.name}`
+      );
+      if (!shared) {
+        Alert.alert(
+          isUrdu ? 'شیئر نہیں ہو سکیا' : 'Sharing unavailable',
+          isUrdu ? 'اس ڈیوائس تے شیئرنگ دستیاب نہیں۔' : 'Sharing is not available on this device.'
+        );
+      }
     } catch (err) {
-      console.error('Failed to share bill:', err);
+      logger.error('Failed to create bill PDF:', err);
+      Alert.alert(
+        isUrdu ? 'PDF نہیں بن سکی' : 'Could not create PDF',
+        isUrdu ? 'دوبارہ کوشش کرو۔' : 'Please try again.'
+      );
+    } finally {
+      setExporting(false);
     }
-  }, [ledger, billNumber, startDate, endDate, grossPayable, netDue]);
+  }, [brand, billNumber, endDate, exporting, isUrdu, lang, ledger, startDate]);
 
   const handleRecordPayment = useCallback(
     async (payment: NewBuyerPayment) => {
@@ -280,10 +278,11 @@ Thank you for your business!`;
       <View style={styles.ctaRow}>
         <AppButton
           variant="primary"
-          title={isUrdu ? 'بل شیئر کریں' : 'Share bill'}
-          icon={<AppIcon name="share" size={18} color="#FFFFFF" />}
+          title={isUrdu ? 'PDF شیئر کریں' : 'Share PDF'}
+          icon={<AppIcon name="print" size={18} color="#FFFFFF" />}
           onPress={handleShareBill}
-          disabled={!ledger}
+          loading={exporting}
+          disabled={!ledger || exporting}
           style={styles.flex}
         />
         {!isSettled ? (
@@ -327,11 +326,12 @@ Thank you for your business!`;
         </View>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={isUrdu ? 'بل شیئر کریں' : 'Share bill'}
+          accessibilityLabel={isUrdu ? 'بل PDF شیئر کریں' : 'Share bill as PDF'}
+          accessibilityState={{ busy: exporting, disabled: !ledger || exporting }}
           onPress={handleShareBill}
-          disabled={!ledger}
+          disabled={!ledger || exporting}
           style={({ pressed }) => [styles.backButton, { backgroundColor: theme.primaryLight }, pressed && styles.pressed]}>
-          <AppIcon name="share" size={18} color={theme.primaryDark} />
+          <AppIcon name="print" size={18} color={theme.primaryDark} />
         </Pressable>
       </View>
 

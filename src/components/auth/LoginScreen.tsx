@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AuthHero } from './AuthHero';
@@ -8,31 +8,51 @@ import { BorderRadius, Shadows, Spacing } from '@/constants/theme';
 import { useAdmin } from '@/context/admin-context';
 import { useLanguage } from '@/context/language-context';
 import { useTheme } from '@/hooks/use-theme';
+import { useSync } from '@/sync';
+import { formatCountdown } from '@/utils/pin-security';
+import { usePinCountdown } from '@/utils/use-pin-countdown';
 
 interface LoginScreenProps {
   onSuccess?: () => void;
-  onGoToRegister?: () => void;
 }
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9'];
 
-export function LoginScreen({ onSuccess, onGoToRegister }: LoginScreenProps) {
+/** Local PIN quick-lock shown after the account session is restored. */
+export function LoginScreen({ onSuccess }: LoginScreenProps) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const { isUrdu } = useLanguage();
-  const { hasPinSet, loginAdmin, loginWorker, setAuthScreen } = useAdmin();
+  const { hasPinSet, loginAdmin, loginWorker, pinLockedUntil, pinAttemptsRemaining } = useAdmin();
+  const { isSignedIn, signOut, pendingCount } = useSync();
 
   const [enteredPin, setEnteredPin] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+  const [showWrongPin, setShowWrongPin] = useState(false);
   const [isChecking, setIsChecking] = useState(false);
 
   const tr = (en: string, ur: string) => (isUrdu ? ur : en);
 
+  const lockSeconds = usePinCountdown(pinLockedUntil);
+  const isLocked = lockSeconds > 0;
+  const shownMessage = isLocked
+    ? tr(
+        `Too many wrong attempts. Try again in ${formatCountdown(lockSeconds)}.`,
+        `بہت زیادہ غلط کوششیں۔ ${formatCountdown(lockSeconds)} بعد دوبارہ کوشش کریں۔`
+      )
+    : showWrongPin
+      ? tr(
+          `Incorrect PIN. ${pinAttemptsRemaining} ${pinAttemptsRemaining === 1 ? 'attempt' : 'attempts'} left before lockout.`,
+          `غلط پن کوڈ۔ لاک ہونے سے پہلے ${pinAttemptsRemaining} کوششیں باقی ہیں۔`
+        )
+      : errorMessage;
+
   const handleKeyPress = async (val: string) => {
-    if (isChecking || enteredPin.length >= 4) return;
+    if (isChecking || isLocked || enteredPin.length >= 4) return;
     const next = enteredPin + val;
     setEnteredPin(next);
     setErrorMessage('');
+    setShowWrongPin(false);
 
     if (next.length === 4) {
       setIsChecking(true);
@@ -41,7 +61,7 @@ export function LoginScreen({ onSuccess, onGoToRegister }: LoginScreenProps) {
         if (success) {
           onSuccess?.();
         } else {
-          setErrorMessage(tr('Incorrect PIN. Please try again.', 'غلط پن کوڈ۔ دوبارہ کوشش کریں۔'));
+          setShowWrongPin(true);
           setEnteredPin('');
         }
       } catch {
@@ -56,6 +76,7 @@ export function LoginScreen({ onSuccess, onGoToRegister }: LoginScreenProps) {
   const handleBackspace = () => {
     setEnteredPin((prev) => prev.slice(0, -1));
     setErrorMessage('');
+    setShowWrongPin(false);
   };
 
   const handleOpenDashboard = async () => {
@@ -68,9 +89,20 @@ export function LoginScreen({ onSuccess, onGoToRegister }: LoginScreenProps) {
     onSuccess?.();
   };
 
-  const goToRegister = () => {
-    if (onGoToRegister) onGoToRegister();
-    else setAuthScreen('register');
+  const confirmSignOut = () => {
+    Alert.alert(
+      tr('Sign out?', 'سائن آؤٹ کریں؟'),
+      pendingCount > 0
+        ? tr(
+            `${pendingCount} change(s) have not synced yet. They stay on this phone and sync when you sign in again.`,
+            `${pendingCount} تبدیلیاں ابھی سنک نہیں ہوئیاں۔ اوہ فون تے رہن گیاں تے دوبارہ لاگ ان تے سنک ہو جان گیاں۔`
+          )
+        : tr('You will need your email and password to sign in again.', 'دوبارہ لاگ ان لئی ای میل تے پاس ورڈ چاہیدا ہووے گا۔'),
+      [
+        { text: tr('Cancel', 'منسوخ'), style: 'cancel' },
+        { text: tr('Sign out', 'سائن آؤٹ'), style: 'destructive', onPress: () => signOut().catch(() => {}) },
+      ]
+    );
   };
 
   const renderKey = (num: string) => (
@@ -78,6 +110,7 @@ export function LoginScreen({ onSuccess, onGoToRegister }: LoginScreenProps) {
       key={num}
       accessibilityRole="button"
       accessibilityLabel={num}
+      disabled={isLocked}
       onPress={() => handleKeyPress(num)}
       android_ripple={{ color: theme.backgroundSelected, borderless: true }}
       style={({ pressed }) => [
@@ -125,7 +158,7 @@ export function LoginScreen({ onSuccess, onGoToRegister }: LoginScreenProps) {
                         styles.dot,
                         {
                           backgroundColor: filled ? theme.primary : 'transparent',
-                          borderColor: errorMessage ? theme.danger : filled ? theme.primary : theme.inputBorder,
+                          borderColor: shownMessage ? theme.danger : filled ? theme.primary : theme.inputBorder,
                         },
                       ]}
                     />
@@ -136,9 +169,9 @@ export function LoginScreen({ onSuccess, onGoToRegister }: LoginScreenProps) {
               <Text
                 style={[
                   styles.errorText,
-                  { color: theme.danger, opacity: errorMessage ? 1 : 0 },
+                  { color: theme.danger, opacity: shownMessage ? 1 : 0 },
                 ]}>
-                {errorMessage || ' '}
+                {shownMessage || ' '}
               </Text>
 
               <View style={styles.keypad}>
@@ -153,6 +186,7 @@ export function LoginScreen({ onSuccess, onGoToRegister }: LoginScreenProps) {
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel={tr('Delete', 'مٹائیں')}
+                    disabled={isLocked}
                     onPress={handleBackspace}
                     onLongPress={() => setEnteredPin('')}
                     style={({ pressed }) => [styles.keySpacer, styles.keyAux, pressed && styles.pressed]}>
@@ -207,14 +241,17 @@ export function LoginScreen({ onSuccess, onGoToRegister }: LoginScreenProps) {
           )}
         </View>
 
-        <Pressable onPress={goToRegister} style={({ pressed }) => [styles.footerLink, pressed && styles.pressed]}>
-          <Text style={[styles.footerText, { color: theme.textSecondary }]}>
-            {tr('Setting up a new farm? ', 'نیا فارم بنانا ہے؟ ')}
-            <Text style={{ color: theme.primary, fontWeight: '700' }}>
-              {tr('Create farm', 'فارم بنائیں')}
+        {isSignedIn ? (
+          <Pressable
+            accessibilityRole="button"
+            onPress={confirmSignOut}
+            style={({ pressed }) => [styles.footerLink, pressed && styles.pressed]}>
+            <Text style={[styles.footerText, { color: theme.textSecondary }]}>
+              {tr('Not your farm? ', 'تہاڈا فارم نہیں؟ ')}
+              <Text style={{ color: theme.primary, fontWeight: '700' }}>{tr('Sign out', 'سائن آؤٹ')}</Text>
             </Text>
-          </Text>
-        </Pressable>
+          </Pressable>
+        ) : null}
 
         <Text style={[styles.version, { color: theme.textMuted }]}>DairyFlow · v1.0.0</Text>
       </ScrollView>

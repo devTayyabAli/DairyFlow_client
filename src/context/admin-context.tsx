@@ -3,6 +3,19 @@ import { useSQLiteContext } from 'expo-sqlite';
 
 import { useLanguage } from '@/context/language-context';
 import { getAppSetting, setAppSetting } from '@/db/database';
+import { checkPin, hashPin } from '@/utils/pin-crypto';
+import {
+  attemptsRemaining,
+  FAILED_ATTEMPTS_KEY,
+  isValidPin,
+  LOCKED_UNTIL_KEY,
+  lockRemainingMs,
+  parseCounter,
+  parseStoredPin,
+  PIN_SETTING_KEY,
+  recordFailure,
+  type StoredPin,
+} from '@/utils/pin-security';
 
 export const DEFAULT_FARM_NAME = 'DairyFlow';
 const DEFAULT_OWNER_EN = 'Farm Admin';
@@ -44,6 +57,12 @@ interface AdminContextType {
   ownerPhone: string;
   defaultMilkRate: string;
   isLoading: boolean;
+  /** Consecutive wrong PIN attempts (persisted, reset on success). */
+  failedAttempts: number;
+  /** Epoch ms until which PIN entry is locked; 0 when not locked. */
+  pinLockedUntil: number;
+  /** Wrong PINs still allowed before the next lockout. */
+  pinAttemptsRemaining: number;
   verifyPin: (pin: string) => Promise<boolean>;
   setNewPin: (newPin: string) => Promise<void>;
   updateFarmProfile: (data: Partial<FarmProfile>) => Promise<void>;
@@ -72,6 +91,9 @@ const AdminContext = createContext<AdminContextType>({
   ownerPhone: '',
   defaultMilkRate: '220',
   isLoading: true,
+  failedAttempts: 0,
+  pinLockedUntil: 0,
+  pinAttemptsRemaining: 5,
   verifyPin: async () => false,
   setNewPin: async () => {},
   updateFarmProfile: async () => {},
@@ -95,7 +117,12 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
 
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [hasPinSet, setHasPinSet] = useState<boolean>(false);
-  const [currentPin, setCurrentPin] = useState<string>('');
+  // Only a salted hash is ever kept (state or DB); the plain PIN is never stored.
+  const storedPinRef = useRef<StoredPin>({ kind: 'none' });
+  const checkingRef = useRef<boolean>(false);
+  const [failedAttempts, setFailedAttempts] = useState<number>(0);
+  const [pinLockedUntil, setPinLockedUntil] = useState<number>(0);
+  const lockRef = useRef({ failedAttempts: 0, lockedUntil: 0 });
   const [isRegistered, setIsRegistered] = useState<boolean>(false);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [authScreen, setAuthScreen] = useState<'login' | 'register' | null>(null);
@@ -117,23 +144,55 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
     isUrduRef.current = isUrdu;
   }, [isUrdu]);
 
+  const applyLockState = useCallback((failed: number, lockedUntil: number) => {
+    lockRef.current = { failedAttempts: failed, lockedUntil };
+    setFailedAttempts(failed);
+    setPinLockedUntil(lockedUntil);
+  }, []);
+
+  const persistLockState = useCallback(
+    async (failed: number, lockedUntil: number) => {
+      applyLockState(failed, lockedUntil);
+      await Promise.all([
+        setAppSetting(db, FAILED_ATTEMPTS_KEY, String(failed)),
+        setAppSetting(db, LOCKED_UNTIL_KEY, String(lockedUntil)),
+      ]);
+    },
+    [db, applyLockState]
+  );
+
   // Load all admin settings on mount
   const loadAdminSettings = useCallback(async () => {
     const isUrdu = isUrduRef.current;
     try {
-      const [savedPin, savedFarm, savedOwner, savedPhone, savedRate, savedRegistered] = await Promise.all([
-        getAppSetting(db, 'admin_pin', ''),
-        getAppSetting(db, 'farm_name', ''),
-        getAppSetting(db, 'admin_name', ''),
-        getAppSetting(db, 'admin_phone', ''),
-        getAppSetting(db, 'default_milk_rate', '220'),
-        // Fresh installs start unregistered so the owner sets up the farm first.
-        getAppSetting(db, 'is_registered', '0'),
-      ]);
+      const [savedPin, savedFarm, savedOwner, savedPhone, savedRate, savedRegistered, savedFailed, savedLockedUntil] =
+        await Promise.all([
+          getAppSetting(db, PIN_SETTING_KEY, ''),
+          getAppSetting(db, 'farm_name', ''),
+          getAppSetting(db, 'admin_name', ''),
+          getAppSetting(db, 'admin_phone', ''),
+          getAppSetting(db, 'default_milk_rate', '220'),
+          // Fresh installs start unregistered so the owner sets up the farm first.
+          getAppSetting(db, 'is_registered', '0'),
+          getAppSetting(db, FAILED_ATTEMPTS_KEY, '0'),
+          getAppSetting(db, LOCKED_UNTIL_KEY, '0'),
+        ]);
 
-      const pinExists = Boolean(savedPin && savedPin.trim().length === 4);
-      setHasPinSet(pinExists);
-      setCurrentPin(pinExists ? savedPin.trim() : '');
+      let stored = parseStoredPin(savedPin);
+      if (stored.kind === 'legacy') {
+        // Migrate a plain 4-digit PIN from an older build to a salted hash. The same PIN
+        // keeps working; if the write fails the plain value is kept and still verifies.
+        try {
+          const hashed = await hashPin(stored.pin);
+          await setAppSetting(db, PIN_SETTING_KEY, hashed);
+          stored = parseStoredPin(hashed);
+        } catch {
+          // keep legacy value; upgraded on the next successful verification
+        }
+      }
+      storedPinRef.current = stored;
+      setHasPinSet(stored.kind === 'legacy' || stored.kind === 'v1');
+      applyLockState(parseCounter(savedFailed), parseCounter(savedLockedUntil));
 
       const registered = savedRegistered === '1';
       setIsRegistered(registered);
@@ -151,20 +210,50 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  }, [db]);
+  }, [db, applyLockState]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time load of persisted settings on mount
     loadAdminSettings();
   }, [loadAdminSettings]);
 
+  // Check an entered PIN: enforces the persisted lockout, counts failures, upgrades legacy values.
+  const attemptPin = async (inputPin: string): Promise<boolean> => {
+    const stored = storedPinRef.current;
+    if (stored.kind !== 'legacy' && stored.kind !== 'v1') return true;
+    if (checkingRef.current) return false;
+    if (lockRemainingMs(lockRef.current.lockedUntil, Date.now()) > 0) return false;
+
+    checkingRef.current = true;
+    try {
+      const input = inputPin.trim();
+      const ok = isValidPin(input) && (await checkPin(stored, input));
+      if (ok) {
+        if (stored.kind === 'legacy') {
+          try {
+            const hashed = await hashPin(input);
+            await setAppSetting(db, PIN_SETTING_KEY, hashed);
+            storedPinRef.current = parseStoredPin(hashed);
+          } catch {
+            // keep legacy value; retried on the next successful verification
+          }
+        }
+        if (lockRef.current.failedAttempts > 0 || lockRef.current.lockedUntil > 0) {
+          await persistLockState(0, 0);
+        }
+        return true;
+      }
+      const next = recordFailure(lockRef.current, Date.now());
+      await persistLockState(next.failedAttempts, next.lockedUntil);
+      return false;
+    } finally {
+      checkingRef.current = false;
+    }
+  };
+
   // Verify PIN
   const verifyPin = async (inputPin: string): Promise<boolean> => {
-    if (!hasPinSet || !currentPin) {
-      setIsAdmin(true);
-      return true;
-    }
-    const isValid = inputPin.trim() === currentPin.trim();
+    const isValid = await attemptPin(inputPin);
     if (isValid) {
       setIsAdmin(true);
     }
@@ -174,14 +263,17 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
   // Set new PIN
   const setNewPin = async (newPin: string): Promise<void> => {
     const cleanPin = newPin.trim();
-    if (cleanPin.length === 4) {
-      await setAppSetting(db, 'admin_pin', cleanPin);
-      setCurrentPin(cleanPin);
+    if (isValidPin(cleanPin)) {
+      const hashed = await hashPin(cleanPin);
+      await setAppSetting(db, PIN_SETTING_KEY, hashed);
+      storedPinRef.current = parseStoredPin(hashed);
+      await persistLockState(0, 0);
       setHasPinSet(true);
       setIsAdmin(true);
     } else if (cleanPin.length === 0) {
       await db.runAsync("DELETE FROM app_settings WHERE key = 'admin_pin';");
-      setCurrentPin('');
+      storedPinRef.current = { kind: 'none' };
+      await persistLockState(0, 0);
       setHasPinSet(false);
       setIsAdmin(true);
     }
@@ -225,14 +317,16 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
     const cleanPhone = data.ownerPhone.trim();
     const cleanRate = data.defaultMilkRate.trim() || '220';
     const cleanPin = data.pin.trim();
+    const hasNewPin = isValidPin(cleanPin);
+    const hashedPin = hasNewPin ? await hashPin(cleanPin) : '';
 
     await Promise.all([
       setAppSetting(db, 'farm_name', cleanFarm),
       setAppSetting(db, 'admin_name', cleanOwner),
       setAppSetting(db, 'admin_phone', cleanPhone),
       setAppSetting(db, 'default_milk_rate', cleanRate),
-      cleanPin.length === 4
-        ? setAppSetting(db, 'admin_pin', cleanPin)
+      hasNewPin
+        ? setAppSetting(db, PIN_SETTING_KEY, hashedPin)
         : db.runAsync("DELETE FROM app_settings WHERE key = 'admin_pin';"),
       setAppSetting(db, 'is_registered', '1'),
     ]);
@@ -241,13 +335,9 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
     setOwnerName(cleanOwner);
     setOwnerPhone(cleanPhone);
     setDefaultMilkRate(cleanRate);
-    if (cleanPin.length === 4) {
-      setCurrentPin(cleanPin);
-      setHasPinSet(true);
-    } else {
-      setCurrentPin('');
-      setHasPinSet(false);
-    }
+    storedPinRef.current = hasNewPin ? parseStoredPin(hashedPin) : { kind: 'none' };
+    await persistLockState(0, 0);
+    setHasPinSet(hasNewPin);
     setIsRegistered(true);
     setIsAuthenticated(true);
     setIsAdmin(true);
@@ -256,13 +346,7 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
 
   // Login as Admin using PIN
   const loginAdmin = async (pin: string): Promise<boolean> => {
-    if (!hasPinSet || !currentPin) {
-      setIsAuthenticated(true);
-      setIsAdmin(true);
-      setAuthScreen(null);
-      return true;
-    }
-    if (pin.trim() === currentPin.trim()) {
+    if (await attemptPin(pin)) {
       setIsAuthenticated(true);
       setIsAdmin(true);
       setAuthScreen(null);
@@ -326,6 +410,9 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
         ownerPhone,
         defaultMilkRate,
         isLoading,
+        failedAttempts,
+        pinLockedUntil,
+        pinAttemptsRemaining: attemptsRemaining(failedAttempts),
         verifyPin,
         setNewPin,
         updateFarmProfile,

@@ -17,8 +17,14 @@ import {
   FilterChip,
 } from '@/components/ui';
 import { BorderRadius, Shadows, Spacing, Typography } from '@/constants/theme';
+import { useLanguage } from '@/context/language-context';
 import { ActivityType, NewLivestockActivity } from '@/db/database';
 import { useTheme } from '@/hooks/use-theme';
+import {
+  activityTypeLabel,
+  defaultActivityTitle,
+  isDefaultActivityTitle,
+} from '@/utils/herd-labels';
 
 export interface LogActivityModalProps {
   visible: boolean;
@@ -27,6 +33,15 @@ export interface LogActivityModalProps {
   defaultAnimalTag?: string;
 }
 
+const ACTIVITY_TYPES: ActivityType[] = [
+  'Vaccination',
+  'Deworming',
+  'Calving',
+  'Insemination',
+  'Group Move',
+  'Treatment',
+];
+
 export function LogActivityModal({
   visible,
   onClose,
@@ -34,12 +49,15 @@ export function LogActivityModal({
   defaultAnimalTag = '',
 }: LogActivityModalProps) {
   const theme = useTheme();
+  const { isUrdu } = useLanguage();
+  const lang = isUrdu ? 'ur' : 'en';
+  const tr = (en: string, ur: string) => (isUrdu ? ur : en);
 
   const todayStr = new Date().toISOString().split('T')[0];
 
   const [animalTag, setAnimalTag] = useState(defaultAnimalTag);
   const [activityType, setActivityType] = useState<ActivityType>('Vaccination');
-  const [title, setTitle] = useState('Vaccination completed');
+  const [title, setTitle] = useState(() => defaultActivityTitle('Vaccination', lang));
   const [date, setDate] = useState(todayStr);
   const [notes, setNotes] = useState('');
 
@@ -48,36 +66,13 @@ export function LogActivityModal({
 
   const handleActivityTypeChange = (type: ActivityType) => {
     setActivityType(type);
-    switch (type) {
-      case 'Vaccination':
-        setTitle('Vaccination completed');
-        break;
-      case 'Deworming':
-        setTitle('Deworming completed');
-        break;
-      case 'Calving':
-        setTitle('New calf registered');
-        break;
-      case 'Insemination':
-        setTitle('Artificial insemination');
-        break;
-      case 'Treatment':
-        setTitle('Medical treatment');
-        break;
-      case 'Group Move':
-        setTitle('Moved to lactating group');
-        break;
-      case 'Other':
-      default:
-        setTitle('Herd health check');
-        break;
-    }
+    setTitle(defaultActivityTitle(type, lang));
   };
 
   const resetForm = () => {
     setAnimalTag(defaultAnimalTag);
     setActivityType('Vaccination');
-    setTitle('Vaccination completed');
+    setTitle(defaultActivityTitle('Vaccination', lang));
     setDate(todayStr);
     setNotes('');
     setError(null);
@@ -90,11 +85,16 @@ export function LogActivityModal({
 
   const handleSubmit = async () => {
     if (!animalTag.trim()) {
-      setError('Please specify which animal or tag (e.g. Buffalo B-07 or Cow C-12).');
+      setError(
+        tr(
+          'Please specify which animal or tag (e.g. Buffalo B-07 or Cow C-12).',
+          'جانور یا ٹیگ دسو (مثلاً Buffalo B-07 یا Cow C-12)۔'
+        )
+      );
       return;
     }
     if (!title.trim()) {
-      setError('Please provide an activity title.');
+      setError(tr('Please provide an activity title.', 'سرگرمی دا عنوان لکھو۔'));
       return;
     }
 
@@ -102,17 +102,24 @@ export function LogActivityModal({
       setSaving(true);
       setError(null);
 
+      // A suggested title typed in the other language is re-localised so records stay consistent.
+      const finalTitle = isDefaultActivityTitle(title.trim())
+        ? defaultActivityTitle(activityType, lang)
+        : title.trim();
+
       await onSave({
         animal_tag: animalTag.trim(),
         activity_type: activityType,
-        title: title.trim(),
+        title: finalTitle,
         date: date.trim() || todayStr,
         notes: notes.trim() || undefined,
       });
 
       handleClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to record activity.');
+      setError(
+        err instanceof Error ? err.message : tr('Failed to record activity.', 'سرگرمی درج نہیں ہو سکی۔')
+      );
     } finally {
       setSaving(false);
     }
@@ -127,29 +134,37 @@ export function LogActivityModal({
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.overlay}>
-        <Pressable style={styles.backdrop} onPress={handleClose} />
+        <Pressable
+          style={styles.backdrop}
+          onPress={handleClose}
+          accessibilityRole="button"
+          accessibilityLabel={tr('Close', 'بند کرو')}
+        />
 
         <View style={[styles.sheetContainer, { backgroundColor: theme.card, borderColor: theme.border }]}>
           {/* Header */}
           <View style={[styles.modalHeader, { borderBottomColor: theme.border }]}>
-            <View>
-              <ThemedText style={styles.modalTitle}>Log Herd Activity</ThemedText>
+            <View style={styles.headerText}>
+              <ThemedText style={styles.modalTitle}>{tr('Log Herd Activity', 'ریوڑ دی سرگرمی درج کرو')}</ThemedText>
               <ThemedText style={[styles.modalSubtitle, { color: theme.textSecondary }]}>
-                Vaccinations, treatments, deworming & breeding
+                {tr(
+                  'Vaccinations, treatments, deworming & breeding',
+                  'ٹیکے، علاج، کیڑے مار دوا تے نسل کشی'
+                )}
               </ThemedText>
             </View>
             <Pressable
               onPress={handleClose}
               hitSlop={8}
               accessibilityRole="button"
-              accessibilityLabel="Close"
+              accessibilityLabel={tr('Close', 'بند کرو')}
               style={styles.closeBtn}>
               <AppIcon name="close" size={20} color={theme.textSecondary} />
             </Pressable>
           </View>
 
           {error ? (
-            <View style={[styles.errorBox, { backgroundColor: theme.dangerBg }]}>
+            <View accessibilityRole="alert" style={[styles.errorBox, { backgroundColor: theme.dangerBg }]}>
               <AppIcon name="alert" size={16} color={theme.danger} />
               <ThemedText style={[styles.errorText, { color: theme.danger }]}>
                 {error}
@@ -159,52 +174,37 @@ export function LogActivityModal({
 
           <ScrollView
             contentContainerStyle={styles.formScroll}
+            keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}>
             {/* 1. Activity Type */}
             <View style={styles.fieldGroup}>
-              <ThemedText style={[styles.fieldLabel, { color: theme.textSecondary }]}>Activity Type</ThemedText>
+              <ThemedText style={[styles.fieldLabel, { color: theme.textSecondary }]}>
+                {tr('Activity Type', 'سرگرمی دی قسم')}
+              </ThemedText>
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
                 contentContainerStyle={styles.chipsRow}>
-                <FilterChip
-                  label="Vaccination"
-                  selected={activityType === 'Vaccination'}
-                  onPress={() => handleActivityTypeChange('Vaccination')}
-                />
-                <FilterChip
-                  label="Deworming"
-                  selected={activityType === 'Deworming'}
-                  onPress={() => handleActivityTypeChange('Deworming')}
-                />
-                <FilterChip
-                  label="Calving"
-                  selected={activityType === 'Calving'}
-                  onPress={() => handleActivityTypeChange('Calving')}
-                />
-                <FilterChip
-                  label="Insemination"
-                  selected={activityType === 'Insemination'}
-                  onPress={() => handleActivityTypeChange('Insemination')}
-                />
-                <FilterChip
-                  label="Group Move"
-                  selected={activityType === 'Group Move'}
-                  onPress={() => handleActivityTypeChange('Group Move')}
-                />
-                <FilterChip
-                  label="Treatment"
-                  selected={activityType === 'Treatment'}
-                  onPress={() => handleActivityTypeChange('Treatment')}
-                />
+                {ACTIVITY_TYPES.map((type) => (
+                  <FilterChip
+                    key={type}
+                    label={activityTypeLabel(type, lang)}
+                    selected={activityType === type}
+                    onPress={() => handleActivityTypeChange(type)}
+                  />
+                ))}
               </ScrollView>
             </View>
 
             {/* 2. Animal Tag */}
             <AppTextInput
-              label="Animal Tag or Group *"
-              placeholder="e.g. Buffalo B-07, Cow C-12, or All Calves"
+              label={tr('Animal Tag or Group', 'جانور دا ٹیگ یا گروپ')}
+              required
+              placeholder={tr(
+                'e.g. Buffalo B-07, Cow C-12, or All Calves',
+                'مثلاً Buffalo B-07، Cow C-12 یا سارے بچھڑے'
+              )}
               value={animalTag}
               onChangeText={(t) => {
                 setAnimalTag(t);
@@ -214,24 +214,30 @@ export function LogActivityModal({
 
             {/* 3. Title */}
             <AppTextInput
-              label="Activity Title *"
-              placeholder="e.g. HS vaccine administered"
+              label={tr('Activity Title', 'سرگرمی دا عنوان')}
+              required
+              placeholder={tr('e.g. HS vaccine administered', 'مثلاً گلہڑ گھوٹو ویکسین لگائی')}
               value={title}
               onChangeText={setTitle}
             />
 
             {/* 4. Date */}
             <AppTextInput
-              label="Date (YYYY-MM-DD) *"
+              label={tr('Date (YYYY-MM-DD)', 'تاریخ (YYYY-MM-DD)')}
+              required
               placeholder="YYYY-MM-DD"
               value={date}
               onChangeText={setDate}
+              keyboardType="numbers-and-punctuation"
             />
 
             {/* 5. Notes */}
             <AppTextInput
-              label="Medicine / Doctor / Notes"
-              placeholder="e.g. Dr. Nadeem · 5ml intramuscular dose"
+              label={tr('Medicine / Doctor / Notes', 'دوائی / ڈاکٹر / نوٹس')}
+              placeholder={tr(
+                'e.g. Dr. Nadeem · 5ml intramuscular dose',
+                'مثلاً ڈاکٹر ندیم · 5 ملی لیٹر ٹیکہ'
+              )}
               value={notes}
               onChangeText={setNotes}
               multiline
@@ -244,14 +250,14 @@ export function LogActivityModal({
             <AppButton
               variant="secondary"
               size="md"
-              title="Cancel"
+              title={tr('Cancel', 'منسوخ')}
               onPress={handleClose}
               style={styles.cancelBtn}
             />
             <AppButton
               variant="primary"
               size="md"
-              title="Save Activity"
+              title={tr('Save Activity', 'سرگرمی محفوظ کرو')}
               loading={saving}
               onPress={handleSubmit}
               style={styles.submitBtn}
@@ -294,6 +300,9 @@ const styles = StyleSheet.create({
   modalSubtitle: {
     fontSize: Typography.footnote.fontSize,
   },
+  headerText: {
+    flex: 1,
+  },
   closeBtn: {
     width: 44,
     height: 44,
@@ -310,6 +319,7 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.sm,
   },
   errorText: {
+    flex: 1,
     fontSize: Typography.caption.fontSize,
     fontWeight: '600',
   },

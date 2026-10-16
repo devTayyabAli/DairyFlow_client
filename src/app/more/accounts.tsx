@@ -1,7 +1,7 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import React, { useCallback, useMemo, useState } from 'react';
-import { Alert, Pressable, RefreshControl, ScrollView, Share, StyleSheet, View } from 'react-native';
+import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { RecordPaymentModal } from '@/components/dairy/RecordPaymentModal';
@@ -23,8 +23,12 @@ import {
   recordBuyerPayment,
   WeeklyFinancialReport,
 } from '@/db/database';
+import { useReportBrand } from '@/hooks/use-report-brand';
 import { useTheme } from '@/hooks/use-theme';
 import { getFridayToThursdayWeek } from '@/utils/week-cycle';
+import { logger } from '@/utils/logger';
+import { exportPdf } from '@/utils/pdf-export';
+import { buildFinancialReportHtml, monthRangeOf, reportFileName } from '@/utils/pdf-report';
 
 const formatRs = (n: number) => `Rs ${Math.round(n).toLocaleString()}`;
 
@@ -32,6 +36,8 @@ export default function AccountsScreen() {
   const theme = useTheme();
   const db = useSQLiteContext();
   const { isUrdu } = useLanguage();
+  const { brand, lang } = useReportBrand();
+  const [exporting, setExporting] = useState(false);
 
   const [weekOffset, setWeekOffset] = useState<number>(0);
   const [report, setReport] = useState<WeeklyFinancialReport | null>(null);
@@ -50,7 +56,7 @@ export default function AccountsScreen() {
       setReport(finReport);
       setBuyers(allBuyers);
     } catch (err) {
-      console.error('Failed to load weekly financial report:', err);
+      logger.error('Failed to load weekly financial report:', err);
     } finally {
       setRefreshing(false);
     }
@@ -85,41 +91,71 @@ export default function AccountsScreen() {
     [db, isUrdu, loadData]
   );
 
-  const handleShareReport = useCallback(async () => {
+  // PDF export: the selected week, or the whole calendar month that week ends in.
+  const exportReport = useCallback(
+    async (kind: 'weekly' | 'monthly') => {
+      if (exporting) return;
+      setExporting(true);
+      try {
+        let data = report;
+        let start = period.startDate;
+        let end = period.endDate;
+        if (kind === 'monthly') {
+          const month = monthRangeOf(period.endDate);
+          start = month.start;
+          end = month.end;
+          data = await getWeeklyFinancialReport(db, start, end);
+        }
+        if (!data) return;
+
+        const html = buildFinancialReportHtml({ brand, lang, report: data, kind });
+        const shared = await exportPdf(
+          html,
+          reportFileName(kind === 'weekly' ? 'weekly_report' : 'monthly_report', start, end),
+          isUrdu ? 'رپورٹ شیئر کرو' : 'Share report'
+        );
+        if (!shared) {
+          Alert.alert(
+            isUrdu ? 'شیئر نہیں ہو سکیا' : 'Sharing unavailable',
+            isUrdu ? 'اس ڈیوائس تے شیئرنگ دستیاب نہیں۔' : 'Sharing is not available on this device.'
+          );
+        }
+      } catch (err) {
+        logger.error('Failed to export report PDF:', err);
+        Alert.alert(
+          isUrdu ? 'PDF نہیں بن سکی' : 'Could not create PDF',
+          isUrdu ? 'دوبارہ کوشش کرو۔' : 'Please try again.'
+        );
+      } finally {
+        setExporting(false);
+      }
+    },
+    [brand, db, exporting, isUrdu, lang, period.endDate, period.startDate, report]
+  );
+
+  const handleExportPress = useCallback(() => {
     if (!report) return;
-
-    let catLines = '';
-    for (const c of report.expenseCategories) {
-      catLines += `• ${c.category}: Rs ${c.amount.toLocaleString()} (${c.percentage}%)\n`;
-    }
-
-    const message = `*DAIRYFLOW FARM — WEEKLY FINANCIAL STATEMENT*
-Period: ${period.label}
-
-*1. MILK PRODUCTION & REVENUE*
-• Total Milk Volume: ${report.totalMilkLiters} Liters
-• Morning Shift: ${report.morningLiters} L | Evening Shift: ${report.eveningLiters} L
-• Daily Average: ${report.avgDailyLiters} L/day
-• Gross Milk Revenue: Rs ${report.totalMilkRevenue.toLocaleString()}
-
-*2. OPERATING EXPENSES*
-${catLines || '• No operating expenses recorded\n'}Total Operating Expenses: Rs ${report.totalExpenses.toLocaleString()}
-
-*3. NET OPERATING PROFIT*
-Net Profit: Rs ${report.netOperatingProfit.toLocaleString()}
-
-*4. RECEIVABLES & COLLECTIONS*
-• Weekly Collections: Rs ${report.totalCollections.toLocaleString()}
-• Total Pending Receivables: Rs ${report.totalReceivables.toLocaleString()}
-
-Generated via DairyFlow Management System`;
-
-    try {
-      await Share.share({ message, title: `DairyFlow Weekly Report (${period.startDate})` });
-    } catch (err) {
-      console.error('Failed to share report:', err);
-    }
-  }, [report, period.label, period.startDate]);
+    const month = monthRangeOf(period.endDate);
+    Alert.alert(
+      isUrdu ? 'رپورٹ PDF' : 'Export PDF report',
+      isUrdu ? 'کیہڑی رپورٹ بنانی اے؟' : 'Which report would you like?',
+      [
+        {
+          text: isUrdu ? `ہفتہ وار (${period.label})` : `Weekly · ${period.label}`,
+          onPress: () => {
+            exportReport('weekly');
+          },
+        },
+        {
+          text: isUrdu ? `ماہانہ (${month.start.slice(0, 7)})` : `Monthly · ${month.start.slice(0, 7)}`,
+          onPress: () => {
+            exportReport('monthly');
+          },
+        },
+        { text: isUrdu ? 'منسوخ' : 'Cancel', style: 'cancel' },
+      ]
+    );
+  }, [exportReport, isUrdu, period.endDate, period.label, report]);
 
   const revenue = report?.totalMilkRevenue ?? 0;
   const expenses = report?.totalExpenses ?? 0;
@@ -154,15 +190,17 @@ Generated via DairyFlow Management System`;
         </View>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={isUrdu ? 'رپورٹ شیئر کرو' : 'Share report'}
-          onPress={handleShareReport}
+          accessibilityLabel={isUrdu ? 'رپورٹ PDF' : 'Export PDF report'}
+          accessibilityState={{ busy: exporting, disabled: exporting }}
+          disabled={exporting}
+          onPress={handleExportPress}
           hitSlop={6}
           style={({ pressed }) => [
             styles.iconBtn,
             { backgroundColor: theme.card, borderColor: theme.border },
             pressed && styles.pressed,
           ]}>
-          <AppIcon name="share" size={18} color={theme.text} />
+          <AppIcon name="print" size={18} color={theme.text} />
         </Pressable>
       </View>
 

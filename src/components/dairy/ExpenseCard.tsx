@@ -45,9 +45,30 @@ function ExpenseCardBase({
   // Feed calculation string (e.g. "100 kg × Rs 40/kg")
   const feedCalculationText = useMemo(() => {
     if (!isFeed || !expense.quantity || !expense.unit_price) return null;
-    const unitLabel = expense.unit ? expense.unit : 'unit';
+    const urduUnits: Record<string, string> = {
+      kg: 'کلو',
+      bags: 'بوری',
+      bales: 'گٹھا',
+      maund: 'من',
+    };
+    const rawUnit = expense.unit ? expense.unit : '';
+    const unitLabel = rawUnit
+      ? isUrdu
+        ? urduUnits[rawUnit] ?? rawUnit
+        : rawUnit
+      : isUrdu
+        ? 'یونٹ'
+        : 'unit';
     return `${expense.quantity} ${unitLabel} × ${currencySymbol} ${expense.unit_price}/${unitLabel}`;
-  }, [isFeed, expense.quantity, expense.unit_price, expense.unit, currencySymbol]);
+  }, [isFeed, isUrdu, expense.quantity, expense.unit_price, expense.unit, currencySymbol]);
+
+  const paymentLabel = useMemo(() => {
+    const pm = expense.payment_method ?? '';
+    if (!isUrdu) return pm;
+    if (pm === 'Bank Transfer') return 'بینک ٹرانسفر';
+    if (pm === 'Credit / Due') return 'ادھار / واجب الادا';
+    return pm;
+  }, [expense.payment_method, isUrdu]);
 
   // Subtitle combining supplier/payee and date
   const subtitleText = useMemo(() => {
@@ -152,7 +173,7 @@ function ExpenseCardBase({
           {/* Feed notes if present */}
           {isFeed && expense.notes ? (
             <ThemedText style={[styles.feedNotesText, { color: theme.textMuted }]} numberOfLines={1}>
-              Note: {expense.notes}
+              {isUrdu ? 'نوٹ' : 'Note'}: {expense.notes}
             </ThemedText>
           ) : null}
         </View>
@@ -166,7 +187,7 @@ function ExpenseCardBase({
           {expense.payment_method && expense.payment_method !== 'Cash' ? (
             <View style={[styles.paymentBadge, { backgroundColor: theme.backgroundElement }]}>
               <ThemedText style={[styles.paymentBadgeText, { color: theme.textSecondary }]}>
-                {expense.payment_method}
+                {paymentLabel}
               </ThemedText>
             </View>
           ) : null}
@@ -175,9 +196,9 @@ function ExpenseCardBase({
             {onEdit ? (
               <Pressable
                 onPress={() => onEdit(expense)}
-                hitSlop={8}
+                hitSlop={10}
                 accessibilityRole="button"
-                accessibilityLabel={`Edit ${expense.title}`}
+                accessibilityLabel={isUrdu ? `${expense.title} میں ترمیم کریں` : `Edit ${expense.title}`}
                 style={({ pressed }) => [styles.actionBtn, pressed && styles.pressed]}>
                 <Ionicons name="pencil-outline" size={15} color={theme.textSecondary} />
               </Pressable>
@@ -186,9 +207,9 @@ function ExpenseCardBase({
             {onDelete ? (
               <Pressable
                 onPress={handleDeletePress}
-                hitSlop={8}
+                hitSlop={10}
                 accessibilityRole="button"
-                accessibilityLabel={`Delete ${expense.title}`}
+                accessibilityLabel={isUrdu ? `${expense.title} حذف کریں` : `Delete ${expense.title}`}
                 style={({ pressed }) => [styles.deleteBtn, pressed && styles.pressed]}>
                 <Ionicons name="trash-outline" size={15} color={theme.danger} />
               </Pressable>

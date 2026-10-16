@@ -145,7 +145,7 @@ export function AppButton({
       case 'sm':
         return {
           container: {
-            height: Layout.buttonHeight.sm,
+            minHeight: Layout.buttonHeight.sm,
             paddingHorizontal: 12,
             borderRadius: BorderRadius.sm,
           },
@@ -159,7 +159,7 @@ export function AppButton({
       case 'md':
         return {
           container: {
-            height: Layout.buttonHeight.md,
+            minHeight: Layout.buttonHeight.md,
             paddingHorizontal: 16,
             borderRadius: BorderRadius.md,
           },
@@ -174,7 +174,7 @@ export function AppButton({
       default:
         return {
           container: {
-            height: Layout.buttonHeight.lg,
+            minHeight: Layout.buttonHeight.lg,
             paddingHorizontal: 20,
             borderRadius: BorderRadius.md + 2, // 14px rounded button
           },
@@ -195,8 +195,10 @@ export function AppButton({
     <Pressable
       testID={testID}
       accessibilityRole="button"
+      accessibilityLabel={title}
       accessibilityState={{ disabled: disabled || loading }}
       disabled={disabled || loading}
+      hitSlop={size === 'sm' ? { top: 4, bottom: 4 } : undefined}
       onPress={onPress}
       style={({ pressed }) => [
         styles.base,
@@ -211,14 +213,14 @@ export function AppButton({
         <ActivityIndicator size="small" color={variantStyle.spinnerColor} />
       ) : (
         <View style={[styles.contentRow, { gap: sizeStyle.gap }]}>
-          {icon && iconPosition === 'left' ? <View>{icon}</View> : null}
+          {icon && iconPosition === 'left' ? <View importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>{icon}</View> : null}
           <Text
             numberOfLines={1}
             ellipsizeMode="tail"
             style={[styles.textBase, sizeStyle.text, variantStyle.text, textStyle]}>
             {title}
           </Text>
-          {icon && iconPosition === 'right' ? <View>{icon}</View> : null}
+          {icon && iconPosition === 'right' ? <View importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>{icon}</View> : null}
         </View>
       )}
     </Pressable>

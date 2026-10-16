@@ -38,6 +38,8 @@ export function FilterChip({
       testID={testID}
       onPress={onPress}
       accessibilityRole="button"
+      accessibilityLabel={displayText}
+      hitSlop={{ top: 6, bottom: 6 }}
       accessibilityState={{ selected }}
       style={({ pressed }) => [
         styles.chipBase,

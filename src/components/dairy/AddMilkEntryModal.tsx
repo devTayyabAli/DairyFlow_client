@@ -411,6 +411,8 @@ export function AddMilkEntryModal({
                     <View style={styles.quickDateChipsRow}>
                       <Pressable
                         onPress={() => setDate(todayStr)}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: date === todayStr }}
                         style={[
                           styles.quickDateChip,
                           date === todayStr && { backgroundColor: theme.primaryLight, borderColor: theme.primary },
@@ -431,6 +433,8 @@ export function AddMilkEntryModal({
                         return (
                           <Pressable
                             onPress={() => setDate(yStr)}
+                            accessibilityRole="button"
+                            accessibilityState={{ selected: date === yStr }}
                             style={[
                               styles.quickDateChip,
                               date === yStr && { backgroundColor: theme.primaryLight, borderColor: theme.primary },
@@ -530,6 +534,8 @@ export function AddMilkEntryModal({
                       return (
                         <Pressable
                           key={b.id}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected: isSelected }}
                           onPress={() => {
                             setUserSelectedBuyerId(b.id);
                             setIsBuyerListOpen(false);
@@ -566,6 +572,7 @@ export function AddMilkEntryModal({
                     })}
 
                     <Pressable
+                      accessibilityRole="button"
                       onPress={() => {
                         setIsBuyerListOpen(false);
                         setIsBuyerModalOpen(true);
@@ -625,6 +632,9 @@ export function AddMilkEntryModal({
                 {['3.5', '4.0', '4.5', '5.0', '6.0'].map((fVal) => (
                   <Pressable
                     key={fVal}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Fat ${fVal}`}
+                    accessibilityState={{ selected: fat === fVal }}
                     onPress={() => {
                       setFat(fVal);
                       if (errors.fat) setErrors((prev) => ({ ...prev, fat: '' }));

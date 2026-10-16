@@ -9,9 +9,6 @@ export default function LoginPage() {
       onSuccess={() => {
         router.replace('/');
       }}
-      onGoToRegister={() => {
-        router.push('/register');
-      }}
     />
   );
 }

@@ -13,6 +13,8 @@ import { BorderRadius, Spacing, Typography } from '@/constants/theme';
 import { useAdmin } from '@/context/admin-context';
 import { useLanguage } from '@/context/language-context';
 import { useTheme } from '@/hooks/use-theme';
+import { formatCountdown } from '@/utils/pin-security';
+import { usePinCountdown } from '@/utils/use-pin-countdown';
 
 interface AdminPinModalProps {
   visible: boolean;
@@ -31,26 +33,40 @@ export function AdminPinModal({
 }: AdminPinModalProps) {
   const theme = useTheme();
   const { isUrdu } = useLanguage();
-  const { verifyPin, setNewPin } = useAdmin();
+  const { verifyPin, setNewPin, pinLockedUntil, pinAttemptsRemaining } = useAdmin();
 
   const [enteredPin, setEnteredPin] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string>('');
+  const [showWrongPin, setShowWrongPin] = useState<boolean>(false);
   const [isVerifying, setIsVerifying] = useState<boolean>(false);
+
+  // Lockout only applies when verifying an existing PIN, not when choosing a new one.
+  const lockSeconds = usePinCountdown(mode === 'verify' ? pinLockedUntil : 0);
+  const isLocked = lockSeconds > 0;
+  const lockMessage = isUrdu
+    ? `بہت زیادہ غلط کوششیں۔ ${formatCountdown(lockSeconds)} بعد دوبارہ کوشش کریں۔`
+    : `Too many wrong attempts. Try again in ${formatCountdown(lockSeconds)}.`;
+  const wrongPinMessage = isUrdu
+    ? `غلط پن! لاک ہونے سے پہلے ${pinAttemptsRemaining} کوششیں باقی ہیں۔`
+    : `Incorrect PIN! ${pinAttemptsRemaining} ${pinAttemptsRemaining === 1 ? 'attempt' : 'attempts'} left before lockout.`;
+  const shownMessage = isLocked ? lockMessage : showWrongPin ? wrongPinMessage : errorMessage;
 
   useEffect(() => {
     if (visible) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- reset the keypad each time the modal opens
       setEnteredPin('');
       setErrorMessage('');
+      setShowWrongPin(false);
       setIsVerifying(false);
     }
   }, [visible]);
 
   const handleKeyPress = async (val: string) => {
-    if (enteredPin.length >= 4) return;
+    if (isLocked || enteredPin.length >= 4) return;
     const next = enteredPin + val;
     setEnteredPin(next);
     setErrorMessage('');
+    setShowWrongPin(false);
 
     if (next.length === 4) {
       setIsVerifying(true);
@@ -69,7 +85,7 @@ export function AdminPinModal({
             onClose();
             if (onSuccess) onSuccess();
           } else {
-            setErrorMessage(isUrdu ? 'غلط پن! دوبارہ کوشش کرو۔' : 'Incorrect PIN! Please try again.');
+            setShowWrongPin(true);
             setEnteredPin('');
           }
         }
@@ -86,12 +102,14 @@ export function AdminPinModal({
     if (enteredPin.length > 0) {
       setEnteredPin((prev) => prev.slice(0, -1));
       setErrorMessage('');
+      setShowWrongPin(false);
     }
   };
 
   const handleClear = () => {
     setEnteredPin('');
     setErrorMessage('');
+    setShowWrongPin(false);
   };
 
   return (
@@ -145,9 +163,9 @@ export function AdminPinModal({
           </View>
 
           {/* Error Message */}
-          {errorMessage ? (
+          {shownMessage ? (
             <ThemedText style={[styles.errorText, { color: theme.danger }]}>
-              {errorMessage}
+              {shownMessage}
             </ThemedText>
           ) : (
             <View style={{ height: 20 }} />
@@ -169,7 +187,7 @@ export function AdminPinModal({
                       key={btnKey}
                       accessibilityRole="button"
                       accessibilityLabel={`Key ${btnKey}`}
-                      disabled={isVerifying}
+                      disabled={isVerifying || isLocked}
                       onPress={() => {
                         if (btnKey === 'C') handleClear();
                         else if (btnKey === '⌫') handleBackspace();
@@ -264,7 +282,7 @@ const styles = StyleSheet.create({
     fontSize: Typography.caption.fontSize,
     fontWeight: '700',
     textAlign: 'center',
-    height: 20,
+    minHeight: 20,
   },
   keypadGrid: {
     width: '100%',

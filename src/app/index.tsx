@@ -41,6 +41,7 @@ import {
 } from '@/db/database';
 import { useTheme } from '@/hooks/use-theme';
 import { useSync } from '@/sync';
+import { logger } from '@/utils/logger';
 
 const EMPTY_SUMMARY: DaySummary = {
   totalLiters: 0,
@@ -126,7 +127,7 @@ export default function HomeScreen() {
         setBuyers(allBuyers);
         setDefaultBuyer(defBuyer);
       } catch (error) {
-        if (isSubscribed) console.error('Failed to load dashboard data:', error);
+        if (isSubscribed) logger.error('Failed to load dashboard data:', error);
       } finally {
         if (isSubscribed) {
           setLoading(false);

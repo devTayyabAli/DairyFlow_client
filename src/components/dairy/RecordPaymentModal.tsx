@@ -209,6 +209,8 @@ export function RecordPaymentModal({
                 </View>
                 <Pressable
                   onPress={() => handleQuickAmount(outstandingBalance)}
+                  accessibilityRole="button"
+                  hitSlop={8}
                   style={[styles.fullPayBadge, { backgroundColor: theme.card }]}>
                   <ThemedText style={[styles.fullPayText, { color: theme.primary }]}>
                     {isUrdu ? 'پوری ادائیگی' : 'Pay full'}
@@ -235,6 +237,8 @@ export function RecordPaymentModal({
                 {QUICK_AMOUNTS.map((val) => (
                   <Pressable
                     key={val}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: amount === String(val) }}
                     onPress={() => handleQuickAmount(val)}
                     style={[
                       styles.quickChip,
@@ -269,6 +273,8 @@ export function RecordPaymentModal({
                   return (
                     <Pressable
                       key={method}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: isSelected }}
                       onPress={() => setPaymentMethod(method)}
                       style={[
                         styles.methodCard,
