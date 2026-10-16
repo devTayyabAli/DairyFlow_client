@@ -18,6 +18,8 @@ export interface SyncResult {
   /** Changes the server refused (validation). They are dropped from the queue, so surface them. */
   rejectedCount?: number;
   rejectedSample?: string;
+  /** What kind of failure, so the UI can show a localized, non-technical message. */
+  kind?: 'network' | 'server';
   message?: string;
 }
 

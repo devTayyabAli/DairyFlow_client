@@ -43,8 +43,6 @@ const styles = StyleSheet.create({
     backgroundColor: BRAND_DARK,
     paddingHorizontal: 24,
     paddingBottom: 56,
-    borderBottomLeftRadius: 28,
-    borderBottomRightRadius: 28,
   },
   heroCompact: {
     paddingBottom: 44,

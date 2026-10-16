@@ -9,6 +9,7 @@ import {
   resolveBuyerUuid,
   resolveAnimalUuid,
 } from '@/db/database';
+import { describeError, fetchWithTimeout, isNetworkError } from './network-errors';
 import { getApiEndpoint } from './sync-config';
 import {
   getAuthToken,
@@ -48,7 +49,7 @@ export function toIsoTimestamp(value: string | null | undefined, fallback: strin
 /** True when the farm already has records on the server (used to decide about demo data). */
 export async function serverHasData(token: string): Promise<boolean> {
   try {
-    const res = await fetch(getApiEndpoint('/sync/pull?since=0&limit=1'), {
+    const res = await fetchWithTimeout(getApiEndpoint('/sync/pull?since=0&limit=1'), {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) return false;
@@ -179,7 +180,7 @@ export async function syncNow(db: SQLiteDatabase): Promise<SyncResult> {
 
       if (clientChanges.length > 0) {
         const pushUrl = getApiEndpoint('/sync/push');
-        const pushRes = await fetch(pushUrl, {
+        const pushRes = await fetchWithTimeout(pushUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -196,7 +197,11 @@ export async function syncNow(db: SQLiteDatabase): Promise<SyncResult> {
         if (!pushRes.ok) {
           const errText = await pushRes.text().catch(() => '');
           console.warn('Sync push failed with status:', pushRes.status, errText);
-          return { status: 'error', message: `Server error during push (${pushRes.status})` };
+          return {
+            status: 'error',
+            kind: pushRes.status >= 500 ? 'server' : undefined,
+            message: `Server error during push (${pushRes.status})`,
+          };
         }
 
         const pushData = (await pushRes.json()) as PushResponse;
@@ -225,7 +230,7 @@ export async function syncNow(db: SQLiteDatabase): Promise<SyncResult> {
       const currentCursor = await getSyncCursor(db);
       const pullUrl = getApiEndpoint(`/sync/pull?since=${currentCursor}&limit=500`);
 
-      const pullRes = await fetch(pullUrl, {
+      const pullRes = await fetchWithTimeout(pullUrl, {
         method: 'GET',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -240,7 +245,11 @@ export async function syncNow(db: SQLiteDatabase): Promise<SyncResult> {
       if (!pullRes.ok) {
         const errText = await pullRes.text().catch(() => '');
         console.warn('Sync pull failed with status:', pullRes.status, errText);
-        return { status: 'error', message: `Server error during pull (${pullRes.status})` };
+        return {
+          status: 'error',
+          kind: pullRes.status >= 500 ? 'server' : undefined,
+          message: `Server error during pull (${pullRes.status})`,
+        };
       }
 
       const pullData = (await pullRes.json()) as PullResponse;
@@ -268,7 +277,8 @@ export async function syncNow(db: SQLiteDatabase): Promise<SyncResult> {
     console.warn('Unexpected error during sync:', err);
     return {
       status: 'error',
-      message: err instanceof Error ? err.message : 'Network error during sync',
+      kind: isNetworkError(err) ? 'network' : undefined,
+      message: describeError(err, 'en'),
     };
   } finally {
     isSyncInProgress = false;
