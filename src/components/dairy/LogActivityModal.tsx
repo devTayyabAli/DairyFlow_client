@@ -15,6 +15,7 @@ import {
   AppIcon,
   AppTextInput,
   FilterChip,
+  useToast,
 } from '@/components/ui';
 import { BorderRadius, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useLanguage } from '@/context/language-context';
@@ -52,6 +53,7 @@ export function LogActivityModal({
   const { isUrdu } = useLanguage();
   const lang = isUrdu ? 'ur' : 'en';
   const tr = (en: string, ur: string) => (isUrdu ? ur : en);
+  const toast = useToast();
 
   const todayStr = new Date().toISOString().split('T')[0];
 
@@ -79,11 +81,13 @@ export function LogActivityModal({
   };
 
   const handleClose = () => {
+    if (saving) return;
     resetForm();
     onClose();
   };
 
   const handleSubmit = async () => {
+    if (saving) return;
     if (!animalTag.trim()) {
       setError(
         tr(
@@ -115,11 +119,13 @@ export function LogActivityModal({
         notes: notes.trim() || undefined,
       });
 
-      handleClose();
+      resetForm();
+      onClose();
     } catch (err) {
       setError(
         err instanceof Error ? err.message : tr('Failed to record activity.', 'سرگرمی درج نہیں ہو سکی۔')
       );
+      toast.error(tr('Could not record activity', 'سرگرمی درج نہیں ہو سکی'));
     } finally {
       setSaving(false);
     }
@@ -137,6 +143,7 @@ export function LogActivityModal({
         <Pressable
           style={styles.backdrop}
           onPress={handleClose}
+          disabled={saving}
           accessibilityRole="button"
           accessibilityLabel={tr('Close', 'بند کرو')}
         />
@@ -155,6 +162,7 @@ export function LogActivityModal({
             </View>
             <Pressable
               onPress={handleClose}
+              disabled={saving}
               hitSlop={8}
               accessibilityRole="button"
               accessibilityLabel={tr('Close', 'بند کرو')}
@@ -252,6 +260,7 @@ export function LogActivityModal({
               size="md"
               title={tr('Cancel', 'منسوخ')}
               onPress={handleClose}
+              disabled={saving}
               style={styles.cancelBtn}
             />
             <AppButton

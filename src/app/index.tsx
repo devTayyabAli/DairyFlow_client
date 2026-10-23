@@ -1,7 +1,7 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, View } from 'react-native';
+import { FlatList, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AddBuyerModal } from '@/components/dairy/AddBuyerModal';
@@ -14,12 +14,14 @@ import { ThemedText } from '@/components/themed-text';
 import {
   AppButton,
   AppIcon,
+  DashboardSkeleton,
   HeroFinancialCard,
   IconBubble,
   LanguageToggleButton,
   StatCard,
+  useToast,
 } from '@/components/ui';
-import { BorderRadius, Layout, Shadows, Spacing, Typography } from '@/constants/theme';
+import { BorderRadius, Layout, Spacing, Typography } from '@/constants/theme';
 import { useAdmin } from '@/context/admin-context';
 import { useLanguage } from '@/context/language-context';
 import {
@@ -69,7 +71,13 @@ export default function HomeScreen() {
   const theme = useTheme();
   const { isUrdu } = useLanguage();
   const { farmName } = useAdmin();
-  const { syncNow, isSignedIn } = useSync();
+  const { syncNow, isSignedIn, role } = useSync();
+
+  useEffect(() => {
+    if (role === 'collector' || role === 'farmer') {
+      router.replace('/collection' as never);
+    }
+  }, [role]);
 
   const todayDateStr = getLocalDateStr();
   const [selectedDate, setSelectedDate] = useState<string>(todayDateStr);
@@ -86,24 +94,10 @@ export default function HomeScreen() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [entryToEdit, setEntryToEdit] = useState<MilkEntry | null>(null);
   const [isAddBuyerModalOpen, setIsAddBuyerModalOpen] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
-  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const toast = useToast();
   const hasFocusedOnce = useRef(false);
-
-  useEffect(
-    () => () => {
-      if (toastTimer.current) clearTimeout(toastTimer.current);
-    },
-    []
-  );
-
-  const showToast = useCallback((msg: string) => {
-    if (toastTimer.current) clearTimeout(toastTimer.current);
-    setToast(msg);
-    toastTimer.current = setTimeout(() => setToast(null), 3000);
-  }, []);
 
   const reload = useCallback(() => setRefreshTrigger((prev) => prev + 1), []);
 
@@ -166,7 +160,7 @@ export default function HomeScreen() {
   const handleSaveEntry = useCallback(
     async (newEntry: NewMilkEntry) => {
       await insertMilkEntry(db, newEntry);
-      showToast(
+      toast.success(
         isUrdu
           ? `${newEntry.liters} لیٹر دا اندراج محفوظ ہو گیا`
           : `Saved ${newEntry.shift} entry (${newEntry.liters} L)`
@@ -174,25 +168,30 @@ export default function HomeScreen() {
       if (newEntry.date !== selectedDate) setSelectedDate(newEntry.date);
       else reload();
     },
-    [db, isUrdu, reload, selectedDate, showToast]
+    [db, isUrdu, reload, selectedDate, toast]
   );
 
   const handleUpdateEntry = useCallback(
     async (id: number, updated: NewMilkEntry) => {
       await updateMilkEntry(db, id, updated);
-      showToast(isUrdu ? 'اندراج اپڈیٹ ہو گیا' : `Updated ${updated.shift} entry`);
+      toast.success(isUrdu ? 'اندراج اپڈیٹ ہو گیا' : `Updated ${updated.shift} entry`);
       reload();
     },
-    [db, isUrdu, reload, showToast]
+    [db, isUrdu, reload, toast]
   );
 
   const handleDeleteEntry = useCallback(
     async (id: number) => {
-      await deleteMilkEntry(db, id);
-      showToast(isUrdu ? 'اندراج مٹا دتا گیا' : 'Entry deleted');
-      reload();
+      try {
+        await deleteMilkEntry(db, id);
+        toast.success(isUrdu ? 'اندراج مٹا دتا گیا' : 'Entry deleted');
+        reload();
+      } catch (error) {
+        logger.error('Failed to delete entry:', error);
+        toast.error(isUrdu ? 'اندراج مٹایا نہیں جا سکیا' : 'Could not delete entry');
+      }
     },
-    [db, isUrdu, reload, showToast]
+    [db, isUrdu, reload, toast]
   );
 
   const handleEditEntry = useCallback((entry: MilkEntry) => {
@@ -211,9 +210,9 @@ export default function HomeScreen() {
       const [updatedBuyers, def] = await Promise.all([getAllBuyers(db), getDefaultBuyer(db)]);
       setBuyers(updatedBuyers);
       if (isDefault) setDefaultBuyer(def);
-      showToast(isUrdu ? `گاہک "${name}" شامل ہو گیا` : `Added buyer "${name}"`);
+      toast.success(isUrdu ? `گاہک "${name}" شامل ہو گیا` : `Added buyer "${name}"`);
     },
-    [db, isUrdu, showToast]
+    [db, isUrdu, toast]
   );
 
   const isToday = selectedDate === todayDateStr;
@@ -297,12 +296,36 @@ export default function HomeScreen() {
         ]}
       />
 
+      {/* Milk collection is the owner's primary action. The sale book stays below it. */}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Open milk collection"
+        onPress={() => router.push('/collection' as never)}
+        style={({ pressed }) => [
+          styles.dodhiBanner,
+          { backgroundColor: theme.primaryLight, borderColor: theme.primary },
+          pressed && { opacity: 0.85 },
+        ]}>
+        <View style={styles.dodhiBannerLeft}>
+          <IconBubble icon="milk" variant="mint" size={38} iconSize={18} />
+          <View style={styles.dodhiBannerTextWrap}>
+            <ThemedText style={[styles.dodhiBannerTitle, { color: theme.text }]}>
+              {isUrdu ? 'دودھ وصولی' : 'Milk collection'}
+            </ThemedText>
+            <ThemedText style={[styles.dodhiBannerSub, { color: theme.textSecondary }]}>
+              {isUrdu ? 'ڈیری، لیٹر، فیٹ، اور جمعہ کا حساب' : 'Dairies, liters, fat, and Friday accounts'}
+            </ThemedText>
+          </View>
+        </View>
+        <AppIcon name="chevronRight" size={20} color={theme.primary} />
+      </Pressable>
+
       <AppButton
-        variant="primary"
+        variant="secondary"
         size="lg"
         fullWidth
-        title={isUrdu ? 'دودھ دا اندراج' : 'Add milk sale'}
-        icon={<AppIcon name="add" size={20} color="#FFFFFF" />}
+        title={isUrdu ? 'دودھ کی فروخت' : 'Milk sale book'}
+        icon={<AppIcon name="add" size={20} color={theme.primary} />}
         onPress={() => setIsAddModalOpen(true)}
       />
 
@@ -319,7 +342,7 @@ export default function HomeScreen() {
         <StatCard
           label={isUrdu ? 'خالص بچت' : 'Net balance'}
           value={`${netBalance < 0 ? '-' : ''}${formatRs(Math.abs(netBalance))}`}
-          subtext={isUrdu ? 'ہفتہ وار رپورٹ' : 'Weekly report'}
+          subtext={isUrdu ? 'رپورٹس تے حساب' : 'Reports & summary'}
           subtextColor={netBalance < 0 ? theme.danger : theme.primary}
           icon={<IconBubble icon="chart" variant="mint" size={32} iconSize={16} />}
           onPress={() => router.push('/more/accounts')}
@@ -351,17 +374,8 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView edges={['top']} style={[styles.safeArea, { backgroundColor: theme.background }]}>
-      {toast ? (
-        <View style={[styles.toastContainer, { backgroundColor: theme.primaryDark }]}>
-          <AppIcon name="check" size={16} color="#FFFFFF" />
-          <ThemedText style={styles.toastText}>{toast}</ThemedText>
-        </View>
-      ) : null}
-
       {loading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={theme.primary} />
-        </View>
+        <DashboardSkeleton />
       ) : (
         <FlatList
           data={entries}
@@ -415,22 +429,6 @@ const styles = StyleSheet.create({
   flexShrink: { flexShrink: 1 },
   listContent: { paddingHorizontal: Spacing.lg, paddingTop: Spacing.sm },
   headerContainer: { gap: Spacing.md, marginBottom: Spacing.xs },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  toastContainer: {
-    position: 'absolute',
-    top: 50,
-    left: 20,
-    right: 20,
-    zIndex: 999,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: BorderRadius.md,
-    ...Shadows.md,
-  },
-  toastText: { color: '#FFFFFF', fontSize: Typography.subhead.fontSize, fontWeight: '600', flexShrink: 1 },
 
   brandRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: Spacing.sm },
   brandIdentity: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, flexShrink: 1 },
@@ -447,4 +445,30 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: Typography.headline.fontSize, fontWeight: '700' },
   countBadge: { minWidth: 28, paddingHorizontal: 10, paddingVertical: 3, borderRadius: BorderRadius.full, alignItems: 'center' },
   countBadgeText: { fontSize: Typography.footnote.fontSize, fontWeight: '700' },
+
+  dodhiBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: Spacing.md,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+  },
+  dodhiBannerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    flex: 1,
+  },
+  dodhiBannerTextWrap: {
+    flex: 1,
+  },
+  dodhiBannerTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  dodhiBannerSub: {
+    fontSize: 11,
+    marginTop: 2,
+  },
 });

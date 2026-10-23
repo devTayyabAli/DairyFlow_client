@@ -8,7 +8,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
-import { AppButton, IconBubble } from '@/components/ui';
+import { AppButton, IconBubble, useToast } from '@/components/ui';
 import { BorderRadius, Spacing, Typography } from '@/constants/theme';
 import { useAdmin } from '@/context/admin-context';
 import { useLanguage } from '@/context/language-context';
@@ -33,6 +33,7 @@ export function AdminPinModal({
 }: AdminPinModalProps) {
   const theme = useTheme();
   const { isUrdu } = useLanguage();
+  const toast = useToast();
   const { verifyPin, setNewPin, pinLockedUntil, pinAttemptsRemaining } = useAdmin();
 
   const [enteredPin, setEnteredPin] = useState<string>('');
@@ -90,12 +91,19 @@ export function AdminPinModal({
           }
         }
       } catch {
-        setErrorMessage(isUrdu ? 'پن تصدیق وچ خرابی آئی۔' : 'Error verifying PIN.');
+        const message = isUrdu ? 'پن تصدیق وچ خرابی آئی۔' : 'Error verifying PIN.';
+        setErrorMessage(message);
+        toast.error(message);
         setEnteredPin('');
       } finally {
         setIsVerifying(false);
       }
     }
+  };
+
+  const handleClose = () => {
+    if (isVerifying) return;
+    onClose();
   };
 
   const handleBackspace = () => {
@@ -117,7 +125,7 @@ export function AdminPinModal({
       visible={visible}
       animationType="fade"
       transparent
-      onRequestClose={onClose}>
+      onRequestClose={handleClose}>
       <View style={styles.overlay}>
         <SafeAreaView style={[styles.modalCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
           {/* Header Icon & Title */}
@@ -220,7 +228,8 @@ export function AdminPinModal({
             variant="ghost"
             size="sm"
             title={isUrdu ? 'بند کرو / منسوخ' : 'Cancel'}
-            onPress={onClose}
+            onPress={handleClose}
+            disabled={isVerifying}
             style={styles.cancelBtn}
           />
         </SafeAreaView>

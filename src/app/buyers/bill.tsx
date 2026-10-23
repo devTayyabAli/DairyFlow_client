@@ -1,19 +1,12 @@
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import React, { useCallback, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  Pressable,
-  StyleSheet,
-  View,
-} from 'react-native';
+import { FlatList, Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { RecordPaymentModal } from '@/components/dairy/RecordPaymentModal';
 import { ThemedText } from '@/components/themed-text';
-import { AppButton, AppIcon } from '@/components/ui';
+import { AppButton, AppIcon, BusyOverlay, ListSkeleton, useToast } from '@/components/ui';
 import { BorderRadius, Layout, Spacing, Typography } from '@/constants/theme';
 import { useLanguage } from '@/context/language-context';
 import {
@@ -73,6 +66,7 @@ export default function WeeklyBuyerBillScreen() {
   const db = useSQLiteContext();
   const { isUrdu } = useLanguage();
   const { brand, lang } = useReportBrand();
+  const toast = useToast();
   const [exporting, setExporting] = useState(false);
   const params = useLocalSearchParams<{ buyerId?: string; startDate?: string; endDate?: string }>();
 
@@ -136,30 +130,30 @@ export default function WeeklyBuyerBillScreen() {
         reportFileName(`bill_${ledger.buyer.name}`, startDate, endDate),
         `${billNumber} · ${ledger.buyer.name}`
       );
-      if (!shared) {
-        Alert.alert(
-          isUrdu ? 'شیئر نہیں ہو سکیا' : 'Sharing unavailable',
-          isUrdu ? 'اس ڈیوائس تے شیئرنگ دستیاب نہیں۔' : 'Sharing is not available on this device.'
-        );
+      if (shared) {
+        toast.success(isUrdu ? 'بل PDF تیار اے' : 'Bill PDF ready');
+      } else {
+        toast.info(isUrdu ? 'اس ڈیوائس تے شیئرنگ دستیاب نہیں' : 'Sharing is not available on this device');
       }
     } catch (err) {
       logger.error('Failed to create bill PDF:', err);
-      Alert.alert(
-        isUrdu ? 'PDF نہیں بن سکی' : 'Could not create PDF',
-        isUrdu ? 'دوبارہ کوشش کرو۔' : 'Please try again.'
-      );
+      toast.error(isUrdu ? 'PDF نہیں بن سکی۔ دوبارہ کوشش کرو۔' : 'Could not create PDF. Please try again.');
     } finally {
       setExporting(false);
     }
-  }, [brand, billNumber, endDate, exporting, isUrdu, lang, ledger, startDate]);
+  }, [brand, billNumber, endDate, exporting, isUrdu, lang, ledger, startDate, toast]);
 
   const handleRecordPayment = useCallback(
     async (payment: NewBuyerPayment) => {
       await recordBuyerPayment(db, payment);
       await loadData();
-      Alert.alert('Payment Recorded', `Payment of Rs ${payment.amount.toLocaleString()} logged on invoice.`);
+      toast.success(
+        isUrdu
+          ? `Rs ${payment.amount.toLocaleString()} دی ادائیگی درج ہو گئی`
+          : `Payment of Rs ${payment.amount.toLocaleString()} recorded`
+      );
     },
-    [db, loadData]
+    [db, isUrdu, loadData, toast]
   );
 
   const openPayment = useCallback(() => setIsPaymentModalOpen(true), []);
@@ -298,9 +292,7 @@ export default function WeeklyBuyerBillScreen() {
     </View>
   );
 
-  const listEmpty = loading ? (
-    <ActivityIndicator color={theme.primary} style={styles.loader} />
-  ) : (
+  const listEmpty = (
     <View style={[styles.docSide, styles.emptyRow, { backgroundColor: theme.card, borderColor: theme.border }]}>
       <ThemedText style={[styles.cellSub, { color: theme.textMuted }]}>
         {isUrdu ? 'اس مدت میں کوئی ترسیل نہیں' : 'No milk entries in this billing period.'}
@@ -335,6 +327,9 @@ export default function WeeklyBuyerBillScreen() {
         </Pressable>
       </View>
 
+      {loading && !ledger ? (
+        <ListSkeleton />
+      ) : (
       <FlatList
         data={ledger?.entries ?? []}
         keyExtractor={keyExtractor}
@@ -348,6 +343,7 @@ export default function WeeklyBuyerBillScreen() {
         maxToRenderPerBatch={10}
         windowSize={7}
       />
+      )}
 
       {buyer ? (
         <RecordPaymentModal
@@ -359,6 +355,10 @@ export default function WeeklyBuyerBillScreen() {
           outstandingBalance={netDue}
         />
       ) : null}
+      <BusyOverlay
+        visible={exporting}
+        message={isUrdu ? 'پی ڈی ایف بن رہی اے…' : 'Creating PDF…'}
+      />
     </SafeAreaView>
   );
 }
@@ -474,7 +474,6 @@ const styles = StyleSheet.create({
   netLabel: { ...Typography.subhead, fontWeight: '800' },
   netAmount: { ...Typography.title1, fontWeight: '800' },
   ctaRow: { flexDirection: 'row', gap: Spacing.sm },
-  loader: { marginTop: Spacing.xl },
   notFound: {
     flex: 1,
     alignItems: 'center',

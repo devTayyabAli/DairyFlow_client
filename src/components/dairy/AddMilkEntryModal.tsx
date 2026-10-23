@@ -21,11 +21,22 @@ import {
   AppTextInput,
   IconBubble,
   ShiftSelector,
+  useToast,
 } from '@/components/ui';
 import { BorderRadius, Shadows, Spacing, Typography } from '@/constants/theme';
+import { useAdmin } from '@/context/admin-context';
 import { useLanguage } from '@/context/language-context';
 import { Buyer, getAppSetting, MilkEntry, NewMilkEntry, ShiftType } from '@/db/database';
 import { useTheme } from '@/hooks/use-theme';
+import {
+  FAT_PRICING_ENABLED_KEY,
+  FAT_PRICING_REFERENCE_FAT_KEY,
+  FAT_PRICING_SLOPE_KEY,
+  type FatPricing,
+  formatRate,
+  parseFatPricing,
+  rateForFat,
+} from '@/utils/fat-pricing';
 
 export interface AddMilkEntryModalProps {
   visible: boolean;
@@ -55,6 +66,8 @@ export function AddMilkEntryModal({
   const theme = useTheme();
   const db = useSQLiteContext();
   const { isUrdu } = useLanguage();
+  const { isAdmin, defaultMilkRate } = useAdmin();
+  const toast = useToast();
 
   // Helper for local calendar date (YYYY-MM-DD)
   const getTodayLocalDate = (): string => {
@@ -74,18 +87,30 @@ export function AddMilkEntryModal({
   const [liters, setLiters] = useState('');
   const [fat, setFat] = useState('4.5');
   const [rate, setRate] = useState('220');
+  // Admin typed a rate by hand while fat pricing is on; cleared whenever the fat changes.
+  const [rateOverride, setRateOverride] = useState<string | null>(null);
+  const [pricing, setPricing] = useState<FatPricing>(() => parseFatPricing({}));
 
-  // Load admin-configured standard milk rate when adding a new entry
+  // Load the admin's standard rate and fat-pricing rules each time the form opens, so a change
+  // made on another phone (synced) is picked up without restarting the app.
   useEffect(() => {
-    if (visible && !entryToEdit) {
-      getAppSetting(db, 'default_milk_rate', '220')
-        .then((savedRate) => {
-          if (savedRate && savedRate.trim() !== '') {
-            setRate(savedRate.trim());
-          }
-        })
-        .catch(() => {});
-    }
+    if (!visible) return;
+    let active = true;
+    Promise.all([
+      getAppSetting(db, 'default_milk_rate', '220'),
+      getAppSetting(db, FAT_PRICING_ENABLED_KEY, '0'),
+      getAppSetting(db, FAT_PRICING_REFERENCE_FAT_KEY, ''),
+      getAppSetting(db, FAT_PRICING_SLOPE_KEY, ''),
+    ])
+      .then(([savedRate, enabled, referenceFat, slope]) => {
+        if (!active) return;
+        setPricing(parseFatPricing({ enabled, baseRate: savedRate, referenceFat, slope }));
+        if (!entryToEdit && savedRate && savedRate.trim() !== '') setRate(savedRate.trim());
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
   }, [visible, entryToEdit, db]);
 
   // Buyer selection state
@@ -126,6 +151,7 @@ export function AddMilkEntryModal({
       setLiters(entryToEdit.liters.toString());
       setFat(entryToEdit.fat_percentage.toString());
       setRate(entryToEdit.rate_per_liter.toString());
+      setRateOverride(null);
       setUserSelectedBuyerId(entryToEdit.buyer_id);
       setNotes(entryToEdit.notes || '');
     } else if (visible && initialDate) {
@@ -133,9 +159,36 @@ export function AddMilkEntryModal({
     }
   }
 
+  // The milk rate is an admin setting: only the admin may change it. Workers always get the
+  // admin's default rate for new sales, and an existing sale keeps the rate it was recorded with.
+  const rateLocked = !isAdmin;
+
+  // With fat pricing on, the rate follows the fat %: higher fat, higher rate. Editing an old sale
+  // without touching its fat keeps the rate it was recorded with (history must not change when
+  // the admin later changes the pricing).
+  const parsedFat = parseFloat(fat);
+  const fatUnchangedOnEdit = !!entryToEdit && parsedFat === entryToEdit.fat_percentage;
+  const autoRate = pricing.enabled && !fatUnchangedOnEdit ? formatRate(rateForFat(pricing, parsedFat)) : null;
+
+  let effectiveRate: string;
+  if (rateLocked) {
+    effectiveRate = autoRate ?? (entryToEdit ? String(entryToEdit.rate_per_liter) : defaultMilkRate);
+  } else if (pricing.enabled) {
+    effectiveRate = rateOverride ?? autoRate ?? String(entryToEdit?.rate_per_liter ?? rate);
+  } else {
+    effectiveRate = rate;
+  }
+
+  const handleFatChange = (value: string) => {
+    setFat(value);
+    // A new fat means a new rate: drop any manual rate typed for the previous fat.
+    setRateOverride(null);
+    if (errors.fat) setErrors((prev) => ({ ...prev, fat: '' }));
+  };
+
   // Real-time calculation of total amount
   const parsedLiters = parseFloat(liters);
-  const parsedRate = parseFloat(rate);
+  const parsedRate = parseFloat(effectiveRate);
   const liveTotalAmount =
     !isNaN(parsedLiters) && !isNaN(parsedRate) && parsedLiters > 0 && parsedRate > 0
       ? parsedLiters * parsedRate
@@ -147,6 +200,7 @@ export function AddMilkEntryModal({
     setLiters('');
     setNotes('');
     setUserSelectedBuyerId(null);
+    setRateOverride(null);
     setIsBuyerListOpen(false);
     setIsDatePickerOpen(false);
     setErrors({});
@@ -155,6 +209,7 @@ export function AddMilkEntryModal({
   };
 
   const handleClose = () => {
+    if (isSubmitting) return;
     // If user entered significant data, warn before discarding
     if (liters.trim() && !isSubmitting) {
       Alert.alert(
@@ -209,9 +264,13 @@ export function AddMilkEntryModal({
     }
 
     // Rate per liter
-    const rVal = parseFloat(rate);
-    if (!rate.trim() || isNaN(rVal)) {
-      newErrors.rate = 'Please enter rate per liter.';
+    const rVal = parseFloat(effectiveRate);
+    if (!effectiveRate.trim() || isNaN(rVal)) {
+      newErrors.rate = rateLocked
+        ? isUrdu
+          ? 'ایڈمن نے ابھی دودھ دا ریٹ مقرر نہیں کیتا۔'
+          : 'The admin has not set a milk rate yet.'
+        : 'Please enter rate per liter.';
     } else if (rVal <= 0) {
       newErrors.rate = 'Rate must be greater than 0.';
     }
@@ -244,7 +303,7 @@ export function AddMilkEntryModal({
       shift,
       liters: parseFloat(liters),
       fat_percentage: parseFloat(fat),
-      rate_per_liter: parseFloat(rate),
+      rate_per_liter: parseFloat(effectiveRate),
       total_amount: Number(liveTotalAmount.toFixed(2)),
       buyer_id: chosenBuyer.id,
       buyer_name: chosenBuyer.name,
@@ -262,6 +321,7 @@ export function AddMilkEntryModal({
       onClose();
     } catch (e: any) {
       setGeneralError(e.message || 'Failed to save entry to local database.');
+      toast.error(isUrdu ? 'اندراج محفوظ نہیں ہو سکیا' : 'Could not save entry');
       setIsSubmitting(false);
     }
   };
@@ -302,6 +362,7 @@ export function AddMilkEntryModal({
             <View style={[styles.headerRow, { borderBottomColor: theme.border }]}>
               <Pressable
                 onPress={handleClose}
+                disabled={isSubmitting}
                 accessibilityRole="button"
                 accessibilityLabel="Close"
                 hitSlop={12}
@@ -509,7 +570,7 @@ export function AddMilkEntryModal({
                         </ThemedText>
                         <ThemedText style={styles.buyerSubtext} numberOfLines={1}>
                           {chosenBuyer?.phone ? `${chosenBuyer.phone} · ` : ''}
-                          {isUrdu ? `ریٹ: Rs ${rate}/لیٹر` : `Default rate - ${currencySymbol} ${rate}/L`}
+                          {isUrdu ? `ریٹ: Rs ${effectiveRate}/لیٹر` : `Default rate - ${currencySymbol} ${effectiveRate}/L`}
                         </ThemedText>
                       </View>
                     </View>
@@ -612,10 +673,7 @@ export function AddMilkEntryModal({
                     label={isUrdu ? 'فیٹ چکنائی فیصد' : 'Fat percentage'}
                     required
                     value={fat}
-                    onChangeText={(t) => {
-                      setFat(t);
-                      if (errors.fat) setErrors((prev) => ({ ...prev, fat: '' }));
-                    }}
+                    onChangeText={handleFatChange}
                     placeholder="4.5"
                     keyboardType="decimal-pad"
                     unitSuffix="%"
@@ -635,10 +693,7 @@ export function AddMilkEntryModal({
                     accessibilityRole="button"
                     accessibilityLabel={`Fat ${fVal}`}
                     accessibilityState={{ selected: fat === fVal }}
-                    onPress={() => {
-                      setFat(fVal);
-                      if (errors.fat) setErrors((prev) => ({ ...prev, fat: '' }));
-                    }}
+                    onPress={() => handleFatChange(fVal)}
                     style={({ pressed }) => [
                       styles.quickChip,
                       fat === fVal && {
@@ -665,15 +720,31 @@ export function AddMilkEntryModal({
                 <AppTextInput
                   label={isUrdu ? 'ریٹ فی لیٹر (روپے)' : 'Rate per liter'}
                   required
-                  value={rate}
+                  value={effectiveRate}
                   onChangeText={(t) => {
-                    setRate(t);
+                    if (rateLocked) return;
+                    if (pricing.enabled) setRateOverride(t);
+                    else setRate(t);
                     if (errors.rate) setErrors((prev) => ({ ...prev, rate: '' }));
                   }}
                   placeholder="220"
                   keyboardType="decimal-pad"
                   unitSuffix={isUrdu ? 'روپے / لیٹر' : `${currencySymbol} / L`}
                   error={errors.rate}
+                  editable={!rateLocked}
+                  inputContainerStyle={rateLocked ? { backgroundColor: theme.backgroundElement } : undefined}
+                  rightIcon={rateLocked ? <AppIcon name="lock" size={16} color={theme.textMuted} /> : undefined}
+                  helperText={
+                    pricing.enabled && autoRate !== null && rateOverride === null
+                      ? isUrdu
+                        ? `فیٹ ${formatRate(parsedFat)}% دے حساب نال ریٹ خود لگیا${rateLocked ? ' (ایڈمن نے مقرر کیتا)' : ''}۔`
+                        : `Rate follows fat: ${formatRate(parsedFat)}% fat${rateLocked ? ' (set by the admin)' : ''}.`
+                      : rateLocked
+                        ? isUrdu
+                          ? 'ریٹ ایڈمن نے مقرر کیتا اے، ایہ بدلیا نہیں جا سکدا۔'
+                          : 'The rate is set by the admin and cannot be changed here.'
+                        : undefined
+                  }
                 />
               </View>
 
@@ -752,6 +823,7 @@ export function AddMilkEntryModal({
                   variant="ghost"
                   size="md"
                   title={isUrdu ? 'منسوخ کرو' : 'Cancel'}
+                  disabled={isSubmitting}
                   onPress={handleClose}
                   style={styles.cancelGhostBtn}
                 />

@@ -1,5 +1,16 @@
 export type SyncStatus = 'idle' | 'syncing' | 'offline' | 'error';
 
+export type UserRole =
+  | 'owner'
+  | 'manager'
+  | 'accountant'
+  | 'staff'
+  | 'collector'
+  | 'farmer'
+  | 'auditor';
+
+export type BusinessType = 'farm' | 'collection_center' | 'hybrid';
+
 export interface FarmProfile {
   id: string;
   farmName: string;
@@ -7,6 +18,12 @@ export interface FarmProfile {
   email?: string;
   phone?: string;
   defaultMilkRate?: number;
+  businessType?: BusinessType;
+  role?: UserRole;
+  /** This person's own login id. The farm id above is the shared business. */
+  userId?: string;
+  /** This person's name, separate from the business owner's name. */
+  accountName?: string;
   createdAt?: string;
   updatedAt?: string;
 }

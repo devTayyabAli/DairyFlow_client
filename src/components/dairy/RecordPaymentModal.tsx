@@ -15,6 +15,7 @@ import {
   AppIcon,
   AppTextInput,
   FilterChip,
+  useToast,
 } from '@/components/ui';
 import { BorderRadius, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useLanguage } from '@/context/language-context';
@@ -50,6 +51,7 @@ export function RecordPaymentModal({
 }: RecordPaymentModalProps) {
   const theme = useTheme();
   const { isUrdu } = useLanguage();
+  const toast = useToast();
 
   const [selectedBuyerId, setSelectedBuyerId] = useState<number | null>(null);
   const activeBuyerId = preselectedBuyerId ?? (selectedBuyerId ?? (buyers.length > 0 ? buyers[0].id : 0));
@@ -74,15 +76,17 @@ export function RecordPaymentModal({
   }, []);
 
   const handleClose = useCallback(() => {
+    if (saving) return;
     resetForm();
     onClose();
-  }, [resetForm, onClose]);
+  }, [saving, resetForm, onClose]);
 
   const handleQuickAmount = useCallback((val: number) => {
     setAmount(String(val));
   }, []);
 
   const handleSubmit = async () => {
+    if (saving) return;
     if (!activeBuyerId) {
       setError('Please select a buyer.');
       return;
@@ -112,9 +116,11 @@ export function RecordPaymentModal({
         notes: notes.trim() || undefined,
       });
 
-      handleClose();
+      resetForm();
+      onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to record payment.');
+      toast.error(isUrdu ? 'ادائیگی درج نہیں ہو سکی' : 'Could not record payment');
     } finally {
       setSaving(false);
     }
@@ -154,6 +160,7 @@ export function RecordPaymentModal({
 
             <Pressable
               onPress={handleClose}
+              disabled={saving}
               hitSlop={12}
               accessibilityRole="button"
               accessibilityLabel="Close"
@@ -351,12 +358,14 @@ export function RecordPaymentModal({
               variant="secondary"
               title={isUrdu ? 'منسوخ' : 'Cancel'}
               onPress={handleClose}
+              disabled={saving}
               style={styles.cancelBtn}
             />
             <AppButton
               variant="primary"
               title={saving ? (isUrdu ? 'محفوظ ہو رہا ہے...' : 'Saving...') : isUrdu ? 'ادائیگی محفوظ کریں' : 'Save payment'}
               onPress={handleSubmit}
+              loading={saving}
               disabled={saving}
               style={styles.submitBtn}
               icon={<AppIcon name="check" size={18} color="#FFFFFF" />}

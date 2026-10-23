@@ -1,9 +1,8 @@
-import { useFocusEffect } from 'expo-router';
+import { Redirect, useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -21,9 +20,12 @@ import {
   AppCard,
   AppIcon,
   AppTextInput,
+  BusyOverlay,
   FilterChip,
   LanguageToggleButton,
+  ListSkeleton,
   StatCard,
+  useToast,
 } from '@/components/ui';
 import { BorderRadius, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useLanguage } from '@/context/language-context';
@@ -42,6 +44,7 @@ import {
 } from '@/db/database';
 import { useReportBrand } from '@/hooks/use-report-brand';
 import { useTheme } from '@/hooks/use-theme';
+import { useSync } from '@/sync';
 import { logger } from '@/utils/logger';
 import { exportPdf } from '@/utils/pdf-export';
 import { buildMilkSalesReportHtml, reportFileName } from '@/utils/pdf-report';
@@ -59,7 +62,6 @@ interface DateSection {
 }
 
 const SEARCH_DEBOUNCE_MS = 250;
-const TOAST_MS = 3000;
 
 const DATE_PRESETS: { key: DatePreset; en: string; ur: string }[] = [
   { key: 'all', en: 'All time', ur: 'سارا وقت' },
@@ -134,6 +136,12 @@ const SectionHeader = memo(function SectionHeader({
 });
 
 export default function ExploreScreen() {
+  const { role } = useSync();
+  if (role === 'collector' || role === 'farmer') return <Redirect href="/collection" />;
+  return <ExploreScreenBody />;
+}
+
+function ExploreScreenBody() {
   const db = useSQLiteContext();
   const theme = useTheme();
   const { isUrdu } = useLanguage();
@@ -150,7 +158,7 @@ export default function ExploreScreen() {
   // Modals & feedback
   const [isEntryModalOpen, setIsEntryModalOpen] = useState(false);
   const [entryToEdit, setEntryToEdit] = useState<MilkEntry | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
+  const toast = useToast();
   const [exporting, setExporting] = useState(false);
 
   // Filters
@@ -161,29 +169,15 @@ export default function ExploreScreen() {
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
 
-  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasFocusedOnce = useRef(false);
 
   const todayStr = useMemo(() => formatLocalDate(new Date()), []);
-
-  useEffect(
-    () => () => {
-      if (toastTimer.current) clearTimeout(toastTimer.current);
-    },
-    []
-  );
 
   // Debounce search typing before it hits SQLite.
   useEffect(() => {
     const handle = setTimeout(() => setSearchQuery(searchInput), SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(handle);
   }, [searchInput]);
-
-  const showToast = useCallback((msg: string) => {
-    if (toastTimer.current) clearTimeout(toastTimer.current);
-    setToast(msg);
-    toastTimer.current = setTimeout(() => setToast(null), TOAST_MS);
-  }, []);
 
   const reload = useCallback(() => setReloadKey((k) => k + 1), []);
 
@@ -280,45 +274,50 @@ export default function ExploreScreen() {
   const handleSaveEntry = useCallback(
     async (newEntry: NewMilkEntry) => {
       await insertMilkEntry(db, newEntry);
-      showToast(
+      toast.success(
         isUrdu
           ? `${newEntry.liters} لیٹر دا اندراج محفوظ ہو گیا`
           : `Saved ${newEntry.shift} entry (${newEntry.liters} L)`
       );
       reload();
     },
-    [db, isUrdu, reload, showToast]
+    [db, isUrdu, reload, toast]
   );
 
   const handleUpdateEntry = useCallback(
     async (id: number, updated: NewMilkEntry) => {
       await updateMilkEntry(db, id, updated);
-      showToast(
+      toast.success(
         isUrdu ? 'اندراج اپڈیٹ ہو گیا' : `Updated ${updated.shift} entry (${updated.liters} L)`
       );
       setEntryToEdit(null);
       setIsEntryModalOpen(false);
       reload();
     },
-    [db, isUrdu, reload, showToast]
+    [db, isUrdu, reload, toast]
   );
 
   const handleDeleteEntry = useCallback(
     async (id: number) => {
-      await deleteMilkEntry(db, id);
-      showToast(isUrdu ? 'اندراج مٹا دتا گیا' : 'Record deleted');
-      reload();
+      try {
+        await deleteMilkEntry(db, id);
+        toast.success(isUrdu ? 'اندراج مٹا دتا گیا' : 'Record deleted');
+        reload();
+      } catch (error) {
+        logger.error('Failed to delete record:', error);
+        toast.error(isUrdu ? 'اندراج مٹایا نہیں جا سکیا' : 'Could not delete record');
+      }
     },
-    [db, isUrdu, reload, showToast]
+    [db, isUrdu, reload, toast]
   );
 
   const handleAddBuyer = useCallback(
     async (name: string, phone?: string, address?: string, isDefault?: boolean) => {
       await addBuyer(db, name, phone, address, isDefault);
-      showToast(isUrdu ? `گاہک "${name}" شامل ہو گیا` : `Added buyer "${name}"`);
+      toast.success(isUrdu ? `گاہک "${name}" شامل ہو گیا` : `Added buyer "${name}"`);
       reload();
     },
-    [db, isUrdu, reload, showToast]
+    [db, isUrdu, reload, toast]
   );
 
   const handleEditEntry = useCallback((entry: MilkEntry) => {
@@ -359,12 +358,10 @@ export default function ExploreScreen() {
     try {
       setExporting(true);
       if (entries.length === 0) {
-        Alert.alert(
-          isUrdu ? 'کوئی ریکارڈ نہیں' : 'No milk records',
+        toast.info(
           isUrdu
             ? 'موجودہ فلٹر وچ رپورٹ لئی کوئی ریکارڈ نہیں۔'
-            : 'There are no records matching your current filter to put in a report.',
-          [{ text: 'OK' }]
+            : 'No milk records match your filter to put in a report.'
         );
         return;
       }
@@ -393,26 +390,22 @@ export default function ExploreScreen() {
         reportFileName(`milk_sales_${datePreset}`, startDate ?? all[0]?.date, endDate ?? all[all.length - 1]?.date),
         isUrdu ? 'دودھ دی فروخت رپورٹ' : 'Milk sales report'
       );
-      showToast(
-        shared
-          ? isUrdu
-            ? 'PDF رپورٹ تیار اے'
-            : `PDF report ready (${all.length} records)`
-          : isUrdu
-            ? 'اس ڈیوائس تے شیئرنگ دستیاب نہیں'
-            : 'Sharing is not available on this device'
-      );
+      if (shared) {
+        toast.success(isUrdu ? 'PDF رپورٹ تیار اے' : `PDF report ready (${all.length} records)`);
+      } else {
+        toast.info(isUrdu ? 'اس ڈیوائس تے شیئرنگ دستیاب نہیں' : 'Sharing is not available on this device');
+      }
     } catch (err) {
       logger.error('Failed to create milk sales PDF:', err);
-      Alert.alert(
-        isUrdu ? 'PDF نہیں بن سکی' : 'Could not create PDF',
-        err instanceof Error ? err.message : isUrdu ? 'دوبارہ کوشش کرو۔' : 'Please try again.',
-        [{ text: 'OK' }]
+      toast.error(
+        isUrdu
+          ? 'PDF نہیں بن سکی۔ دوبارہ کوشش کرو۔'
+          : `Could not create PDF. ${err instanceof Error ? err.message : 'Please try again.'}`
       );
     } finally {
       setExporting(false);
     }
-  }, [brand, datePreset, db, endDate, entries.length, exporting, isUrdu, lang, searchQuery, shiftFilter, showToast, startDate]);
+  }, [brand, datePreset, db, endDate, entries.length, exporting, isUrdu, lang, searchQuery, shiftFilter, startDate, toast]);
 
   // Derived data
   const summary = useMemo(() => {
@@ -598,13 +591,6 @@ export default function ExploreScreen() {
 
   return (
     <SafeAreaView edges={['top']} style={[styles.safeArea, { backgroundColor: theme.background }]}>
-      {toast ? (
-        <View style={[styles.toastContainer, { backgroundColor: theme.primaryDark }]}>
-          <AppIcon name="check" size={16} color="#FFFFFF" />
-          <ThemedText style={styles.toastText}>{toast}</ThemedText>
-        </View>
-      ) : null}
-
       {/* Slim header */}
       <View style={styles.header}>
         <View style={styles.headerTitleWrap}>
@@ -653,9 +639,7 @@ export default function ExploreScreen() {
       </View>
 
       {loading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={theme.primary} />
-        </View>
+        <ListSkeleton />
       ) : (
         <SectionList<MilkEntry, DateSection>
           sections={sections}
@@ -708,33 +692,16 @@ export default function ExploreScreen() {
         onAddBuyer={handleAddBuyer}
       />
 
+      <BusyOverlay
+        visible={exporting}
+        message={isUrdu ? 'پی ڈی ایف بن رہی اے…' : 'Creating PDF…'}
+      />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1 },
-  toastContainer: {
-    position: 'absolute',
-    top: 50,
-    left: 20,
-    right: 20,
-    zIndex: 999,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: BorderRadius.md,
-    ...Shadows.md,
-  },
-  toastText: {
-    color: '#FFFFFF',
-    fontSize: Typography.subhead.fontSize,
-    fontWeight: '600',
-    flexShrink: 1,
-  },
-
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -760,8 +727,6 @@ const styles = StyleSheet.create({
   resetBtn: { paddingHorizontal: 8, paddingVertical: 4 },
   resetBtnText: { fontSize: Typography.footnote.fontSize, fontWeight: '700' },
   pressed: { opacity: 0.8 },
-
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
 
   listContent: {
     paddingHorizontal: Spacing.lg,

@@ -13,7 +13,8 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AuthHero } from './AuthHero';
-import { AppButton, AppTextInput } from '@/components/ui';
+import { StatusBarCover } from './StatusBarCover';
+import { AppButton, AppTextInput, useToast } from '@/components/ui';
 import { BorderRadius, Shadows, Spacing } from '@/constants/theme';
 import { useLanguage } from '@/context/language-context';
 import { useTheme } from '@/hooks/use-theme';
@@ -38,6 +39,7 @@ export function CloudAuthScreen({ canContinueOffline = false, onContinueOffline 
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const { isUrdu } = useLanguage();
+  const toast = useToast();
   const {
     signIn,
     register,
@@ -155,6 +157,7 @@ export function CloudAuthScreen({ canContinueOffline = false, onContinueOffline 
       } else if (!res.success) {
         setError(res.error || tr('Sign in failed.', 'لاگ ان نہیں ہو سکیا۔'));
       }
+      if (res.success) toast.success(tr('Signed in', 'لاگ ان ہو گیا'));
       // On success the gate swaps this screen out automatically.
     });
 
@@ -186,7 +189,10 @@ export function CloudAuthScreen({ canContinueOffline = false, onContinueOffline 
         phone: regPhone.trim() || undefined,
         defaultMilkRate: milkRate.trim() ? rate : undefined,
       });
-      if (res.otpRequired && res.email) startOtp(res.email, 'register', res.resendAfterSeconds ?? 60);
+      if (res.otpRequired && res.email) {
+        startOtp(res.email, 'register', res.resendAfterSeconds ?? 60);
+        toast.success(tr('Verification code sent to your email', 'تصدیقی کوڈ تہاڈی ای میل تے بھیج دتا گیا'));
+      }
       else setError(res.error || tr('Registration failed.', 'رجسٹریشن نہیں ہو سکی۔'));
     });
 
@@ -198,7 +204,10 @@ export function CloudAuthScreen({ canContinueOffline = false, onContinueOffline 
         return;
       }
       const res = await forgotPassword(email);
-      if (res.otpRequired && res.email) startOtp(res.email, 'reset', res.resendAfterSeconds ?? 60);
+      if (res.otpRequired && res.email) {
+        startOtp(res.email, 'reset', res.resendAfterSeconds ?? 60);
+        toast.success(tr('Reset code sent if the account exists', 'جے اکاؤنٹ اے تے ری سیٹ کوڈ بھیج دتا گیا'));
+      }
       else {
         if (res.retryAfterSeconds) setResendIn(res.retryAfterSeconds);
         setError(res.error || tr('Could not send the code.', 'کوڈ نہیں بھیجیا جا سکیا۔'));
@@ -220,7 +229,10 @@ export function CloudAuthScreen({ canContinueOffline = false, onContinueOffline 
       const res = isReset
         ? await resetPassword(otpEmail, code, newPassword, { replaceLocalData })
         : await verifyOtp(otpEmail, code, { replaceLocalData });
-      if (res.success) return; // the gate takes over
+      if (res.success) {
+        toast.success(tr('Welcome to DairyFlow', 'ڈیری فلو وچ خوش آمدید'));
+        return; // the gate takes over
+      }
 
       if (res.needsConfirmation === 'other-farm') {
         confirmReplace(() => handleVerify(true));
@@ -243,6 +255,7 @@ export function CloudAuthScreen({ canContinueOffline = false, onContinueOffline 
       if (res.success) {
         setOtpCode('');
         setResendIn(res.resendAfterSeconds ?? 60);
+        toast.success(tr('A new code was sent', 'نواں کوڈ بھیج دتا گیا'));
       } else {
         if (res.retryAfterSeconds) setResendIn(res.retryAfterSeconds);
         setError(res.error || tr('Could not resend the code.', 'کوڈ دوبارہ نہیں بھیجیا جا سکیا۔'));
@@ -527,6 +540,7 @@ export function CloudAuthScreen({ canContinueOffline = false, onContinueOffline 
           <Text style={[styles.version, { color: theme.textMuted }]}>DairyFlow · v1.0.0</Text>
         </ScrollView>
       </KeyboardAvoidingView>
+      <StatusBarCover />
     </View>
   );
 }

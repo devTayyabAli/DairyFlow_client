@@ -16,6 +16,7 @@ import { AppButton } from '@/components/ui/button';
 import { AppCard } from '@/components/ui/card';
 import { AppIcon, IconBubble } from '@/components/ui/icon';
 import { AppTextInput } from '@/components/ui/text-input';
+import { useToast } from '@/components/ui/toast';
 import { BorderRadius, Spacing, Typography } from '@/constants/theme';
 import { useLanguage } from '@/context/language-context';
 import { Buyer } from '@/db/database';
@@ -41,6 +42,7 @@ export function AddBuyerModal({
 }: AddBuyerModalProps) {
   const theme = useTheme();
   const { isUrdu } = useLanguage();
+  const toast = useToast();
 
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
@@ -59,9 +61,10 @@ export function AddBuyerModal({
   }, []);
 
   const handleClose = useCallback(() => {
+    if (isSubmitting) return;
     resetForm();
     onClose();
-  }, [resetForm, onClose]);
+  }, [isSubmitting, resetForm, onClose]);
 
   const handleSubmit = async () => {
     const trimmedName = name.trim();
@@ -83,6 +86,7 @@ export function AddBuyerModal({
       return;
     }
 
+    if (isSubmitting) return;
     try {
       setIsSubmitting(true);
       await onSaveBuyer(
@@ -95,6 +99,7 @@ export function AddBuyerModal({
       onClose();
     } catch (e: any) {
       setErrorMessage(e?.message || 'Failed to save buyer.');
+      toast.error(isUrdu ? 'گاہک محفوظ نہیں ہو سکیا' : 'Could not save buyer');
       setIsSubmitting(false);
     }
   };
@@ -123,6 +128,7 @@ export function AddBuyerModal({
 
             <Pressable
               onPress={handleClose}
+              disabled={isSubmitting}
               hitSlop={12}
               accessibilityRole="button"
               accessibilityLabel="Close"
@@ -220,6 +226,7 @@ export function AddBuyerModal({
               title={isSubmitting ? (isUrdu ? 'محفوظ ہو رہا ہے...' : 'Saving...') : isUrdu ? 'گاہک محفوظ کریں' : 'Save buyer'}
               icon={<AppIcon name="check" size={16} color="#FFFFFF" />}
               onPress={handleSubmit}
+              loading={isSubmitting}
               disabled={isSubmitting}
               style={styles.saveBtn}
             />

@@ -6,6 +6,7 @@ import { Pressable, StyleSheet, Text, useColorScheme, View } from 'react-native'
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import AppTabs from '@/components/app-tabs';
 import { AuthGate } from '@/components/auth/AuthGate';
+import { ToastProvider } from '@/components/ui';
 import { AdminProvider } from '@/context/admin-context';
 import { LanguageProvider } from '@/context/language-context';
 import { DB_NAME, initDatabase } from '@/db/database';
@@ -71,9 +72,11 @@ export default function TabLayout() {
         <LanguageProvider>
           <AdminProvider>
             <SyncProvider>
-              <AuthGate>
-                <AppTabs />
-              </AuthGate>
+              <ToastProvider>
+                <AuthGate>
+                  <AppTabs />
+                </AuthGate>
+              </ToastProvider>
               <AnimatedSplashOverlay />
             </SyncProvider>
           </AdminProvider>

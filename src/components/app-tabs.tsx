@@ -3,11 +3,14 @@ import { useColorScheme } from 'react-native';
 
 import { Colors } from '@/constants/theme';
 import { useLanguage } from '@/context/language-context';
+import { useSync } from '@/sync';
 
 export default function AppTabs() {
   const scheme = useColorScheme();
   const colors = Colors[scheme === 'dark' ? 'dark' : 'light'];
   const { t } = useLanguage();
+  const { role } = useSync();
+  const procurementOnly = role === 'collector' || role === 'farmer';
 
   return (
     <NativeTabs
@@ -26,7 +29,7 @@ export default function AppTabs() {
         />
       </NativeTabs.Trigger>
 
-      <NativeTabs.Trigger name="explore">
+      <NativeTabs.Trigger name="explore" hidden={procurementOnly}>
         <NativeTabs.Trigger.Label>{t('tabMilk')}</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon
           sf={{ default: 'drop', selected: 'drop.fill' }}
@@ -34,7 +37,7 @@ export default function AppTabs() {
         />
       </NativeTabs.Trigger>
 
-      <NativeTabs.Trigger name="buyers">
+      <NativeTabs.Trigger name="buyers" hidden={procurementOnly}>
         <NativeTabs.Trigger.Label>{t('tabBuyers')}</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon
           sf={{ default: 'person.2', selected: 'person.2.fill' }}
@@ -42,6 +45,7 @@ export default function AppTabs() {
         />
       </NativeTabs.Trigger>
 
+      {/* Herd / Livestock (Maweshi) commented out for now - will be re-enabled in the future
       <NativeTabs.Trigger name="livestock">
         <NativeTabs.Trigger.Label>{t('tabHerd')}</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon
@@ -49,6 +53,7 @@ export default function AppTabs() {
           md="pets"
         />
       </NativeTabs.Trigger>
+      */}
 
       <NativeTabs.Trigger name="more">
         <NativeTabs.Trigger.Label>{t('tabMore')}</NativeTabs.Trigger.Label>

@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
 import { SQLiteDatabase } from 'expo-sqlite';
+import { reconcileSupplierBalance, writeCollectionAudit } from './procurement';
 import {
   DairyFlowBackupEnvelope,
   createBackupEnvelope,
@@ -267,6 +268,188 @@ export interface BuyerOverviewItem {
   percentagePaid: number;
 }
 
+// ==========================================
+// DODHI (MILK COLLECTION) & FINANCIAL LEDGER TYPES
+// ==========================================
+
+export type SupplierRateType = 'flat' | 'fat_based';
+export type SupplierStatus = 'active' | 'inactive';
+
+export interface Supplier {
+  id: number;
+  name: string;
+  phone?: string | null;
+  village?: string | null;
+  rate_type: SupplierRateType;
+  flat_rate?: number | null;
+  base_fat?: number | null;
+  rate_per_fat_point?: number | null;
+  balance: number;
+  status: SupplierStatus;
+  linked_farm_id?: string | null;
+  created_at: string;
+  uuid?: string;
+  updated_at?: string;
+}
+
+export interface NewSupplier {
+  name: string;
+  phone?: string | null;
+  village?: string | null;
+  rate_type?: SupplierRateType;
+  flat_rate?: number | null;
+  base_fat?: number | null;
+  rate_per_fat_point?: number | null;
+  balance?: number;
+  status?: SupplierStatus;
+  linked_farm_id?: string | null;
+}
+
+export interface MilkCollection {
+  id: number;
+  date: string; // YYYY-MM-DD
+  shift: ShiftType;
+  supplier_id: number;
+  supplier_name: string;
+  liters: number;
+  fat_percentage: number;
+  rate_per_liter: number;
+  total_amount: number;
+  collector_id?: string | null;
+  collector_name?: string | null;
+  pricing_band_uuid?: string | null;
+  collected_at?: string | null;
+  notes?: string | null;
+  created_at: string;
+  uuid?: string;
+  updated_at?: string;
+}
+
+export interface NewMilkCollection {
+  date: string;
+  shift: ShiftType;
+  supplier_id: number;
+  supplier_name: string;
+  liters: number;
+  fat_percentage: number;
+  rate_per_liter: number;
+  total_amount: number;
+  collector_id?: string | null;
+  collector_name?: string | null;
+  pricing_band_uuid?: string | null;
+  collected_at?: string | null;
+  notes?: string | null;
+}
+
+export type TargetType = 'buyer' | 'supplier';
+export type RepaymentTerms = 'single_cut' | 'weekly_cut' | 'manual';
+export type AdvanceStatus = 'active' | 'repaid' | 'cancelled';
+
+export interface Advance {
+  id: number;
+  target_type: TargetType;
+  target_id: number;
+  target_name: string;
+  amount: number;
+  remaining_balance: number;
+  repayment_terms: RepaymentTerms;
+  deduction_per_settlement: number;
+  status: AdvanceStatus;
+  date: string; // YYYY-MM-DD
+  notes?: string | null;
+  created_at: string;
+  uuid?: string;
+  updated_at?: string;
+}
+
+export interface NewAdvance {
+  target_type: TargetType;
+  target_id: number;
+  target_name: string;
+  amount: number;
+  remaining_balance?: number;
+  repayment_terms?: RepaymentTerms;
+  deduction_per_settlement?: number;
+  status?: AdvanceStatus;
+  date: string;
+  notes?: string | null;
+}
+
+export type SettlementStatus = 'draft' | 'due' | 'paid' | 'overdue' | 'disputed';
+
+export interface Settlement {
+  id: number;
+  target_type: TargetType;
+  target_id: number;
+  target_name: string;
+  period_start: string;
+  period_end: string;
+  gross_amount: number;
+  advance_deduction: number;
+  net_amount: number;
+  status: SettlementStatus;
+  expected_payment_date: string;
+  actual_payment_date?: string | null;
+  payment_method?: string;
+  notes?: string | null;
+  created_at: string;
+  uuid?: string;
+  updated_at?: string;
+}
+
+export interface NewSettlement {
+  target_type: TargetType;
+  target_id: number;
+  target_name: string;
+  period_start: string;
+  period_end: string;
+  gross_amount: number;
+  advance_deduction?: number;
+  net_amount: number;
+  status?: SettlementStatus;
+  expected_payment_date: string;
+  actual_payment_date?: string | null;
+  payment_method?: string;
+  notes?: string | null;
+}
+
+export type LedgerEntryType =
+  | 'milk_sale'
+  | 'milk_collection'
+  | 'advance_given'
+  | 'advance_deduction'
+  | 'payment_received'
+  | 'settlement_payout'
+  | 'adjustment';
+
+export interface LedgerEntry {
+  id: number;
+  account_type: TargetType;
+  account_id: number;
+  account_name: string;
+  entry_type: LedgerEntryType;
+  amount: number;
+  reference_id?: string | null;
+  date: string;
+  notes?: string | null;
+  created_at: string;
+  uuid?: string;
+  updated_at?: string;
+}
+
+export interface NewLedgerEntry {
+  account_type: TargetType;
+  account_id: number;
+  account_name: string;
+  entry_type: LedgerEntryType;
+  amount: number;
+  reference_id?: string | null;
+  date: string;
+  notes?: string | null;
+  payment_method?: string | null;
+  payment_reference?: string | null;
+}
+
 export const DB_NAME = 'dairy_farm.db';
 
 /**
@@ -405,12 +588,208 @@ export async function initDatabase(db: SQLiteDatabase): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_livestock_activities_date ON livestock_activities(date);
   `);
 
+  // ==========================================
+  // DODHI & FINANCIAL LEDGER TABLES
+  // ==========================================
+
+  // Create suppliers table
+  await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS suppliers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      phone TEXT,
+      village TEXT,
+      rate_type TEXT NOT NULL CHECK(rate_type IN ('flat', 'fat_based')) DEFAULT 'fat_based',
+      flat_rate REAL,
+      base_fat REAL DEFAULT 6.0,
+      rate_per_fat_point REAL DEFAULT 35.0,
+      balance REAL NOT NULL DEFAULT 0.0,
+      status TEXT NOT NULL CHECK(status IN ('active', 'inactive')) DEFAULT 'active',
+      linked_farm_id TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_suppliers_name ON suppliers(name);
+    CREATE INDEX IF NOT EXISTS idx_suppliers_status ON suppliers(status);
+  `);
+
+  try {
+    await db.execAsync(`ALTER TABLE suppliers ADD COLUMN linked_farm_id TEXT;`);
+  } catch {
+    // Column already exists
+  }
+
+  // Create milk collections table (Dodhi route collection)
+  await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS milk_collections (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      shift TEXT NOT NULL CHECK(shift IN ('Morning', 'Evening')),
+      supplier_id INTEGER NOT NULL,
+      supplier_name TEXT NOT NULL,
+      liters REAL NOT NULL,
+      fat_percentage REAL NOT NULL,
+      rate_per_liter REAL NOT NULL,
+      total_amount REAL NOT NULL,
+      collector_id TEXT,
+      collector_name TEXT,
+      notes TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE RESTRICT
+    );
+    CREATE INDEX IF NOT EXISTS idx_milk_collections_date ON milk_collections(date);
+    CREATE INDEX IF NOT EXISTS idx_milk_collections_shift ON milk_collections(shift);
+    CREATE INDEX IF NOT EXISTS idx_milk_collections_supplier ON milk_collections(supplier_id);
+  `);
+
+  try {
+    await db.execAsync(`ALTER TABLE milk_collections ADD COLUMN collector_name TEXT;`);
+  } catch {
+    // Column already exists
+  }
+  try {
+    await db.execAsync(`ALTER TABLE milk_collections ADD COLUMN pricing_band_uuid TEXT;`);
+  } catch {
+    // Column already exists
+  }
+  try {
+    await db.execAsync(`ALTER TABLE milk_collections ADD COLUMN collected_at TEXT;`);
+  } catch {
+    // Column already exists
+  }
+
+  await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS fat_rate_bands (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      min_fat REAL NOT NULL,
+      max_fat REAL NOT NULL,
+      rate_per_liter REAL NOT NULL,
+      effective_from TEXT NOT NULL,
+      effective_to TEXT,
+      active INTEGER NOT NULL DEFAULT 1,
+      label TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS collector_assignments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      collector_user_id TEXT NOT NULL,
+      supplier_id INTEGER NOT NULL,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS sync_rejections (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      table_name TEXT NOT NULL,
+      record_uuid TEXT NOT NULL,
+      op TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'open',
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS collection_audit (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      collection_uuid TEXT,
+      action TEXT NOT NULL,
+      detail TEXT NOT NULL,
+      actor_id TEXT,
+      created_at TEXT NOT NULL
+    );
+  `);
+
+  // Create advances table
+  await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS advances (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      target_type TEXT NOT NULL CHECK(target_type IN ('buyer', 'supplier')),
+      target_id INTEGER NOT NULL,
+      target_name TEXT NOT NULL,
+      amount REAL NOT NULL,
+      remaining_balance REAL NOT NULL,
+      repayment_terms TEXT NOT NULL CHECK(repayment_terms IN ('single_cut', 'weekly_cut', 'manual')) DEFAULT 'weekly_cut',
+      deduction_per_settlement REAL NOT NULL DEFAULT 0.0,
+      status TEXT NOT NULL CHECK(status IN ('active', 'repaid', 'cancelled')) DEFAULT 'active',
+      date TEXT NOT NULL,
+      notes TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_advances_target ON advances(target_type, target_id);
+    CREATE INDEX IF NOT EXISTS idx_advances_status ON advances(status);
+  `);
+
+  // Create settlements table (weekly Friday cycle)
+  await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS settlements (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      target_type TEXT NOT NULL CHECK(target_type IN ('buyer', 'supplier')),
+      target_id INTEGER NOT NULL,
+      target_name TEXT NOT NULL,
+      period_start TEXT NOT NULL,
+      period_end TEXT NOT NULL,
+      gross_amount REAL NOT NULL,
+      advance_deduction REAL NOT NULL DEFAULT 0.0,
+      net_amount REAL NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('draft', 'due', 'paid', 'overdue', 'disputed')) DEFAULT 'due',
+      expected_payment_date TEXT NOT NULL,
+      actual_payment_date TEXT,
+      payment_method TEXT DEFAULT 'Cash',
+      notes TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_settlements_target ON settlements(target_type, target_id);
+    CREATE INDEX IF NOT EXISTS idx_settlements_status ON settlements(status);
+    CREATE INDEX IF NOT EXISTS idx_settlements_period ON settlements(period_start, period_end);
+  `);
+
+  // Create ledger entries table (immutable financial transactions)
+  await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS ledger_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      account_type TEXT NOT NULL CHECK(account_type IN ('buyer', 'supplier')),
+      account_id INTEGER NOT NULL,
+      account_name TEXT NOT NULL,
+      entry_type TEXT NOT NULL CHECK(entry_type IN ('milk_sale', 'milk_collection', 'advance_given', 'advance_deduction', 'payment_received', 'settlement_payout', 'adjustment')),
+      amount REAL NOT NULL,
+      reference_id TEXT,
+      date TEXT NOT NULL,
+      notes TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_ledger_account ON ledger_entries(account_type, account_id);
+    CREATE INDEX IF NOT EXISTS idx_ledger_date ON ledger_entries(date);
+    CREATE INDEX IF NOT EXISTS idx_ledger_entry_type ON ledger_entries(entry_type);
+  `);
+
+  try {
+    await db.execAsync(`ALTER TABLE ledger_entries ADD COLUMN payment_method TEXT;`);
+  } catch {
+    // Column already exists
+  }
+  try {
+    await db.execAsync(`ALTER TABLE ledger_entries ADD COLUMN payment_reference TEXT;`);
+  } catch {
+    // Column already exists
+  }
+
   // Run offline-first sync migration & trigger setup
   await migrateAndSetupSync(db);
 
   // Ensure no demo/dummy data exists in database (clean fresh start for real users)
   await purgeAllDemoData(db);
 }
+
+/**
+ * app_settings keys that sync to the farm account (farm profile and milk pricing). Everything
+ * else (admin PIN, lockout counters, sync cursor, language…) stays on the device. The backend
+ * keeps its own copy of this list (backend/src/sync/schemas.ts): change both together.
+ */
+export const SYNCED_SETTING_KEYS = [
+  'farm_name',
+  'admin_name',
+  'admin_phone',
+  'default_milk_rate',
+  'fat_pricing_enabled',
+  'fat_pricing_reference_fat',
+  'fat_pricing_slope',
+] as const;
 
 export const SYNCED_TABLES = [
   'buyers',
@@ -419,6 +798,13 @@ export const SYNCED_TABLES = [
   'buyer_payments',
   'livestock',
   'livestock_activities',
+  'suppliers',
+  'milk_collections',
+  'advances',
+  'settlements',
+  'ledger_entries',
+  'fat_rate_bands',
+  'collector_assignments',
 ] as const;
 
 /**
@@ -495,19 +881,25 @@ export async function migrateAndSetupSync(db: SQLiteDatabase): Promise<void> {
     `);
   }
 
-  // 3. Settings triggers for allowed farm configuration keys only
+  // 3. Settings triggers for allowed farm configuration keys only. They are dropped and recreated
+  // on every start so installs created before a key was added to SYNCED_SETTING_KEYS pick it up
+  // (CREATE TRIGGER IF NOT EXISTS would keep the old key list forever).
+  const settingKeys = SYNCED_SETTING_KEYS.map((k) => `'${k}'`).join(', ');
   await db.execAsync(`
-    CREATE TRIGGER IF NOT EXISTS trg_settings_after_insert AFTER INSERT ON app_settings FOR EACH ROW
+    DROP TRIGGER IF EXISTS trg_settings_after_insert;
+    DROP TRIGGER IF EXISTS trg_settings_after_update;
+
+    CREATE TRIGGER trg_settings_after_insert AFTER INSERT ON app_settings FOR EACH ROW
     WHEN (SELECT value FROM app_settings WHERE key='sync_applying') IS NOT '1'
-    AND NEW.key IN ('farm_name', 'admin_name', 'admin_phone', 'default_milk_rate')
+    AND NEW.key IN (${settingKeys})
     BEGIN
       INSERT INTO sync_queue (table_name, row_uuid, op, queued_at)
       VALUES ('settings', NEW.key, 'upsert', datetime('now'));
     END;
 
-    CREATE TRIGGER IF NOT EXISTS trg_settings_after_update AFTER UPDATE ON app_settings FOR EACH ROW
+    CREATE TRIGGER trg_settings_after_update AFTER UPDATE ON app_settings FOR EACH ROW
     WHEN (SELECT value FROM app_settings WHERE key='sync_applying') IS NOT '1'
-    AND NEW.key IN ('farm_name', 'admin_name', 'admin_phone', 'default_milk_rate')
+    AND NEW.key IN (${settingKeys})
     BEGIN
       INSERT INTO sync_queue (table_name, row_uuid, op, queued_at)
       VALUES ('settings', NEW.key, 'upsert', datetime('now'));
@@ -606,6 +998,34 @@ export async function resolveAnimalId(
   const row = await db.getFirstAsync<{ id: number }>(
     'SELECT id FROM livestock WHERE uuid = ? LIMIT 1;',
     [animalUuid]
+  );
+  return row?.id ?? null;
+}
+
+/**
+ * Resolves local integer supplier_id to global supplier_uuid.
+ */
+export async function resolveSupplierUuid(
+  db: SQLiteDatabase,
+  supplierId: number
+): Promise<string | null> {
+  const row = await db.getFirstAsync<{ uuid: string }>(
+    'SELECT uuid FROM suppliers WHERE id = ? LIMIT 1;',
+    [supplierId]
+  );
+  return row?.uuid ?? null;
+}
+
+/**
+ * Resolves global supplier_uuid to local integer supplier_id.
+ */
+export async function resolveSupplierId(
+  db: SQLiteDatabase,
+  supplierUuid: string
+): Promise<number | null> {
+  const row = await db.getFirstAsync<{ id: number }>(
+    'SELECT id FROM suppliers WHERE uuid = ? LIMIT 1;',
+    [supplierUuid]
   );
   return row?.id ?? null;
 }
@@ -812,7 +1232,7 @@ export async function enqueueAllUserDataForSync(db: SQLiteDatabase): Promise<num
 
   // Enqueue allowed farm settings
   const settingsRows = await db.getAllAsync<{ key: string }>(
-    "SELECT key FROM app_settings WHERE key IN ('farm_name', 'admin_name', 'admin_phone', 'default_milk_rate');"
+    `SELECT key FROM app_settings WHERE key IN (${SYNCED_SETTING_KEYS.map((k) => `'${k}'`).join(', ')});`
   );
   for (const s of settingsRows) {
     await db.runAsync(
@@ -1008,6 +1428,19 @@ export async function insertMilkEntry(
       now,
     ]
   );
+
+  // Automatically record to immutable ledger
+  await recordLedgerEntry(db, {
+    account_type: 'buyer',
+    account_id: entry.buyer_id,
+    account_name: entry.buyer_name,
+    entry_type: 'milk_sale',
+    amount: entry.total_amount,
+    reference_id: String(result.lastInsertRowId),
+    date: entry.date,
+    notes: `${entry.shift} Sale: ${entry.liters}L @ Rs ${entry.rate_per_liter}/L`,
+  });
+
   return result.lastInsertRowId;
 }
 
@@ -2165,6 +2598,21 @@ export async function recordBuyerPayment(
       now,
     ]
   );
+
+  const buyer = await getBuyerById(db, payment.buyer_id);
+  if (buyer) {
+    await recordLedgerEntry(db, {
+      account_type: 'buyer',
+      account_id: payment.buyer_id,
+      account_name: buyer.name,
+      entry_type: 'payment_received',
+      amount: -payment.amount,
+      reference_id: String(result.lastInsertRowId),
+      date,
+      notes: payment.notes || `Payment received via ${payment.payment_method || 'Cash'}`,
+    });
+  }
+
   return result.lastInsertRowId;
 }
 
@@ -2516,6 +2964,474 @@ export async function setAppSetting(
     );
   } catch (err) {
     console.error('Error saving app setting:', err);
+  }
+}
+
+// ==========================================
+// DODHI (MILK COLLECTION) & FINANCIAL HELPERS
+// ==========================================
+
+export async function getSuppliers(
+  db: SQLiteDatabase,
+  status?: SupplierStatus
+): Promise<Supplier[]> {
+  const query = status
+    ? 'SELECT * FROM suppliers WHERE status = ? ORDER BY name ASC;'
+    : 'SELECT * FROM suppliers ORDER BY name ASC;';
+  const params = status ? [status] : [];
+  return (await db.getAllAsync<Supplier>(query, params)) || [];
+}
+
+export async function getSupplierById(
+  db: SQLiteDatabase,
+  id: number
+): Promise<Supplier | null> {
+  return await db.getFirstAsync<Supplier>(
+    'SELECT * FROM suppliers WHERE id = ? LIMIT 1;',
+    [id]
+  );
+}
+
+export async function insertSupplier(
+  db: SQLiteDatabase,
+  supplier: NewSupplier
+): Promise<number> {
+  const createdAt = new Date().toISOString();
+  const res = await db.runAsync(
+    `INSERT INTO suppliers (name, phone, village, rate_type, flat_rate, base_fat, rate_per_fat_point, balance, status, linked_farm_id, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+    [
+      supplier.name,
+      supplier.phone || null,
+      supplier.village || null,
+      supplier.rate_type || 'fat_based',
+      supplier.flat_rate ?? null,
+      supplier.base_fat ?? 6.0,
+      supplier.rate_per_fat_point ?? 35.0,
+      supplier.balance ?? 0,
+      supplier.status || 'active',
+      supplier.linked_farm_id || null,
+      createdAt,
+    ]
+  );
+  return res.lastInsertRowId;
+}
+
+export async function updateSupplier(
+  db: SQLiteDatabase,
+  id: number,
+  updates: Partial<NewSupplier>
+): Promise<void> {
+  const existing = await getSupplierById(db, id);
+  if (!existing) return;
+
+  await db.runAsync(
+    `UPDATE suppliers SET
+       name = ?,
+       phone = ?,
+       village = ?,
+       rate_type = ?,
+       flat_rate = ?,
+       base_fat = ?,
+       rate_per_fat_point = ?,
+       balance = ?,
+       status = ?,
+       linked_farm_id = ?,
+       updated_at = datetime('now')
+     WHERE id = ?;`,
+    [
+      updates.name ?? existing.name,
+      updates.phone !== undefined ? (updates.phone ?? null) : (existing.phone ?? null),
+      updates.village !== undefined ? (updates.village ?? null) : (existing.village ?? null),
+      updates.rate_type ?? existing.rate_type,
+      updates.flat_rate !== undefined ? (updates.flat_rate ?? null) : (existing.flat_rate ?? null),
+      updates.base_fat !== undefined ? (updates.base_fat ?? null) : (existing.base_fat ?? null),
+      updates.rate_per_fat_point !== undefined ? (updates.rate_per_fat_point ?? null) : (existing.rate_per_fat_point ?? null),
+      updates.balance !== undefined ? updates.balance : existing.balance,
+      updates.status ?? existing.status,
+      updates.linked_farm_id !== undefined ? (updates.linked_farm_id ?? null) : (existing.linked_farm_id ?? null),
+      id,
+    ]
+  );
+}
+
+export async function deleteSupplier(db: SQLiteDatabase, id: number): Promise<void> {
+  await db.runAsync('DELETE FROM suppliers WHERE id = ?;', [id]);
+}
+
+export async function getMilkCollections(
+  db: SQLiteDatabase,
+  options?: {
+    startDate?: string;
+    endDate?: string;
+    shift?: ShiftType;
+    supplierId?: number;
+    collectorId?: string;
+    limit?: number;
+  }
+): Promise<MilkCollection[]> {
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+
+  if (options?.startDate) {
+    conditions.push('date >= ?');
+    params.push(options.startDate);
+  }
+  if (options?.endDate) {
+    conditions.push('date <= ?');
+    params.push(options.endDate);
+  }
+  if (options?.shift) {
+    conditions.push('shift = ?');
+    params.push(options.shift);
+  }
+  if (options?.supplierId) {
+    conditions.push('supplier_id = ?');
+    params.push(options.supplierId);
+  }
+  if (options?.collectorId) {
+    conditions.push('collector_id = ?');
+    params.push(options.collectorId);
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const limitClause = options?.limit ? `LIMIT ${options.limit}` : '';
+
+  return (
+    (await db.getAllAsync<MilkCollection>(
+      `SELECT * FROM milk_collections ${whereClause} ORDER BY date DESC, id DESC ${limitClause};`,
+      params as (string | number)[]
+    )) || []
+  );
+}
+
+export async function insertMilkCollection(
+  db: SQLiteDatabase,
+  entry: NewMilkCollection
+): Promise<number> {
+  const duplicate = await db.getFirstAsync<{ id: number }>(
+    `SELECT id FROM milk_collections WHERE supplier_id = ? AND date = ? AND shift = ? LIMIT 1;`,
+    [entry.supplier_id, entry.date, entry.shift]
+  );
+  if (duplicate) throw new Error('DUPLICATE_SHIFT');
+
+  const createdAt = entry.collected_at || new Date().toISOString();
+  let insertedId = 0;
+  await db.withTransactionAsync(async () => {
+    const res = await db.runAsync(
+      `INSERT INTO milk_collections (date, shift, supplier_id, supplier_name, liters, fat_percentage, rate_per_liter, total_amount, collector_id, collector_name, pricing_band_uuid, collected_at, notes, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+      [
+        entry.date,
+        entry.shift,
+        entry.supplier_id,
+        entry.supplier_name,
+        entry.liters,
+        entry.fat_percentage,
+        entry.rate_per_liter,
+        entry.total_amount,
+        entry.collector_id || null,
+        entry.collector_name || null,
+        entry.pricing_band_uuid || null,
+        createdAt,
+        entry.notes || null,
+        createdAt,
+      ]
+    );
+    insertedId = res.lastInsertRowId;
+    const saved = await db.getFirstAsync<{ uuid: string }>(
+      `SELECT uuid FROM milk_collections WHERE id = ?;`,
+      [insertedId]
+    );
+    await recordLedgerEntry(db, {
+      account_type: 'supplier',
+      account_id: entry.supplier_id,
+      account_name: entry.supplier_name,
+      entry_type: 'milk_collection',
+      amount: entry.total_amount,
+      reference_id: saved?.uuid || String(insertedId),
+      date: entry.date,
+      notes: `${entry.shift} Collection: ${entry.liters}L @ ${entry.rate_per_liter}/L (Fat: ${entry.fat_percentage}%)`,
+    });
+    await reconcileSupplierBalance(db, entry.supplier_id);
+    await writeCollectionAudit(db, {
+      collectionUuid: saved?.uuid || null,
+      action: 'create',
+      detail: `${entry.liters}L at ${entry.fat_percentage}% fat, Rs ${entry.rate_per_liter}/L`,
+      actorId: entry.collector_id || null,
+    });
+  });
+  return insertedId;
+}
+
+export async function getAdvances(
+  db: SQLiteDatabase,
+  options?: {
+    targetType?: TargetType;
+    targetId?: number;
+    status?: AdvanceStatus;
+  }
+): Promise<Advance[]> {
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+
+  if (options?.targetType) {
+    conditions.push('target_type = ?');
+    params.push(options.targetType);
+  }
+  if (options?.targetId) {
+    conditions.push('target_id = ?');
+    params.push(options.targetId);
+  }
+  if (options?.status) {
+    conditions.push('status = ?');
+    params.push(options.status);
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  return (
+    (await db.getAllAsync<Advance>(
+      `SELECT * FROM advances ${whereClause} ORDER BY date DESC, id DESC;`,
+      params as (string | number)[]
+    )) || []
+  );
+}
+
+export async function insertAdvance(
+  db: SQLiteDatabase,
+  advance: NewAdvance
+): Promise<number> {
+  const createdAt = new Date().toISOString();
+  const remaining = advance.remaining_balance ?? advance.amount;
+  const res = await db.runAsync(
+    `INSERT INTO advances (target_type, target_id, target_name, amount, remaining_balance, repayment_terms, deduction_per_settlement, status, date, notes, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+    [
+      advance.target_type,
+      advance.target_id,
+      advance.target_name,
+      advance.amount,
+      remaining,
+      advance.repayment_terms || 'weekly_cut',
+      advance.deduction_per_settlement || 0,
+      advance.status || 'active',
+      advance.date,
+      advance.notes || null,
+      createdAt,
+    ]
+  );
+
+  // Record ledger entry for advance given
+  await recordLedgerEntry(db, {
+    account_type: advance.target_type,
+    account_id: advance.target_id,
+    account_name: advance.target_name,
+    entry_type: 'advance_given',
+    amount: -advance.amount, // Advance given reduces payable balance or increases buyer debt
+    reference_id: String(res.lastInsertRowId),
+    date: advance.date,
+    notes: advance.notes || `Advance issued (Terms: ${advance.repayment_terms || 'weekly_cut'})`,
+  });
+
+  return res.lastInsertRowId;
+}
+
+export async function recordLedgerEntry(
+  db: SQLiteDatabase,
+  entry: NewLedgerEntry
+): Promise<number> {
+  const createdAt = new Date().toISOString();
+  const res = await db.runAsync(
+    `INSERT INTO ledger_entries (account_type, account_id, account_name, entry_type, amount, reference_id, date, notes, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+    [
+      entry.account_type,
+      entry.account_id,
+      entry.account_name,
+      entry.entry_type,
+      entry.amount,
+      entry.reference_id || null,
+      entry.date,
+      entry.notes || null,
+      createdAt,
+    ]
+  );
+  return res.lastInsertRowId;
+}
+
+export async function getLedgerEntries(
+  db: SQLiteDatabase,
+  options?: {
+    accountType?: TargetType;
+    accountId?: number;
+    startDate?: string;
+    endDate?: string;
+    limit?: number;
+  }
+): Promise<LedgerEntry[]> {
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+
+  if (options?.accountType) {
+    conditions.push('account_type = ?');
+    params.push(options.accountType);
+  }
+  if (options?.accountId) {
+    conditions.push('account_id = ?');
+    params.push(options.accountId);
+  }
+  if (options?.startDate) {
+    conditions.push('date >= ?');
+    params.push(options.startDate);
+  }
+  if (options?.endDate) {
+    conditions.push('date <= ?');
+    params.push(options.endDate);
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const limitClause = options?.limit ? `LIMIT ${options.limit}` : '';
+
+  return (
+    (await db.getAllAsync<LedgerEntry>(
+      `SELECT * FROM ledger_entries ${whereClause} ORDER BY date DESC, id DESC ${limitClause};`,
+      params as (string | number)[]
+    )) || []
+  );
+}
+
+export async function getSettlements(
+  db: SQLiteDatabase,
+  options?: {
+    targetType?: TargetType;
+    targetId?: number;
+    status?: SettlementStatus;
+  }
+): Promise<Settlement[]> {
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+
+  if (options?.targetType) {
+    conditions.push('target_type = ?');
+    params.push(options.targetType);
+  }
+  if (options?.targetId) {
+    conditions.push('target_id = ?');
+    params.push(options.targetId);
+  }
+  if (options?.status) {
+    conditions.push('status = ?');
+    params.push(options.status);
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  return (
+    (await db.getAllAsync<Settlement>(
+      `SELECT * FROM settlements ${whereClause} ORDER BY period_end DESC, id DESC;`,
+      params as (string | number)[]
+    )) || []
+  );
+}
+
+export async function insertSettlement(
+  db: SQLiteDatabase,
+  settlement: NewSettlement
+): Promise<number> {
+  const createdAt = new Date().toISOString();
+  const res = await db.runAsync(
+    `INSERT INTO settlements (target_type, target_id, target_name, period_start, period_end, gross_amount, advance_deduction, net_amount, status, expected_payment_date, actual_payment_date, payment_method, notes, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+    [
+      settlement.target_type,
+      settlement.target_id,
+      settlement.target_name,
+      settlement.period_start,
+      settlement.period_end,
+      settlement.gross_amount,
+      settlement.advance_deduction || 0,
+      settlement.net_amount,
+      settlement.status || 'due',
+      settlement.expected_payment_date,
+      settlement.actual_payment_date || null,
+      settlement.payment_method || 'Cash',
+      settlement.notes || null,
+      createdAt,
+    ]
+  );
+  return res.lastInsertRowId;
+}
+
+export async function markSettlementPaid(
+  db: SQLiteDatabase,
+  id: number,
+  actualPaymentDate: string,
+  paymentMethod: string = 'Cash'
+): Promise<void> {
+  const settlement = await db.getFirstAsync<Settlement>(
+    'SELECT * FROM settlements WHERE id = ? LIMIT 1;',
+    [id]
+  );
+  if (!settlement) return;
+
+  await db.runAsync(
+    `UPDATE settlements SET
+       status = 'paid',
+       actual_payment_date = ?,
+       payment_method = ?,
+       updated_at = datetime('now')
+     WHERE id = ?;`,
+    [actualPaymentDate, paymentMethod, id]
+  );
+
+  // Record payout ledger entry
+  await recordLedgerEntry(db, {
+    account_type: settlement.target_type,
+    account_id: settlement.target_id,
+    account_name: settlement.target_name,
+    entry_type: 'settlement_payout',
+    amount: -settlement.net_amount,
+    reference_id: String(id),
+    date: actualPaymentDate,
+    notes: `Settlement Paid (${settlement.period_start} to ${settlement.period_end}) via ${paymentMethod}`,
+  });
+
+  // Reconcile advance deduction if any
+  if (settlement.advance_deduction > 0) {
+    let remainingDeduction = settlement.advance_deduction;
+    const activeAdvances = await db.getAllAsync<Advance>(
+      'SELECT * FROM advances WHERE target_type = ? AND target_id = ? AND status = \'active\' ORDER BY date ASC, id ASC;',
+      [settlement.target_type, settlement.target_id]
+    );
+
+    for (const adv of activeAdvances || []) {
+      if (remainingDeduction <= 0) break;
+      const cut = Math.min(adv.remaining_balance, remainingDeduction);
+      const newBal = adv.remaining_balance - cut;
+      const newStatus = newBal <= 0 ? 'repaid' : 'active';
+
+      await db.runAsync(
+        'UPDATE advances SET remaining_balance = ?, status = ?, updated_at = datetime(\'now\') WHERE id = ?;',
+        [newBal, newStatus, adv.id]
+      );
+
+      remainingDeduction -= cut;
+    }
+
+    await recordLedgerEntry(db, {
+      account_type: settlement.target_type,
+      account_id: settlement.target_id,
+      account_name: settlement.target_name,
+      entry_type: 'advance_deduction',
+      amount: settlement.advance_deduction,
+      reference_id: String(id),
+      date: actualPaymentDate,
+      notes: `Advance deduction applied on weekly settlement (${settlement.period_start} to ${settlement.period_end})`,
+    });
+  }
+
+  // Deduct settled amount from supplier outstanding balance
+  if (settlement.target_type === 'supplier') {
+    await reconcileSupplierBalance(db, settlement.target_id);
   }
 }
 

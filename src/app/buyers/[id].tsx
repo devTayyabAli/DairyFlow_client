@@ -2,7 +2,6 @@ import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
   Alert,
   FlatList,
   Linking,
@@ -16,7 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { AdminPinModal } from '@/components/dairy/AdminPinModal';
 import { RecordPaymentModal } from '@/components/dairy/RecordPaymentModal';
 import { ThemedText } from '@/components/themed-text';
-import { AppButton, AppCard, AppIcon, ShiftBadge } from '@/components/ui';
+import { AppButton, AppCard, AppIcon, ListSkeleton, ShiftBadge, useToast } from '@/components/ui';
 import { BorderRadius, Layout, Spacing, Typography } from '@/constants/theme';
 import { useAdmin } from '@/context/admin-context';
 import { useLanguage } from '@/context/language-context';
@@ -148,6 +147,7 @@ export default function BuyerLedgerScreen() {
   const theme = useTheme();
   const db = useSQLiteContext();
   const { isUrdu } = useLanguage();
+  const toast = useToast();
   const params = useLocalSearchParams<{ id: string }>();
   const buyerId = parseInt(params.id ?? '0', 10);
 
@@ -199,13 +199,13 @@ export default function BuyerLedgerScreen() {
   const handleCall = useCallback(() => {
     const phone = buyer?.phone;
     if (!phone) {
-      Alert.alert('No Phone', 'No contact number available for this buyer.');
+      toast.info(isUrdu ? 'اس گاہک دا کوئی فون نمبر نہیں' : 'No contact number for this buyer');
       return;
     }
     Linking.openURL(`tel:${phone.replace(/[^\d+]/g, '')}`).catch(() => {
-      Alert.alert('Phone Call', `Contact: ${phone}`);
+      toast.info(isUrdu ? `فون نمبر: ${phone}` : `Contact: ${phone}`);
     });
-  }, [buyer?.phone]);
+  }, [buyer?.phone, isUrdu, toast]);
 
   const openBill = useCallback(() => {
     router.push({
@@ -218,9 +218,13 @@ export default function BuyerLedgerScreen() {
     async (payment: NewBuyerPayment) => {
       await recordBuyerPayment(db, payment);
       await loadLedger();
-      Alert.alert('Payment Saved', `Rs ${payment.amount.toLocaleString()} payment recorded successfully.`);
+      toast.success(
+        isUrdu
+          ? `Rs ${payment.amount.toLocaleString()} دی ادائیگی درج ہو گئی`
+          : `Payment of Rs ${payment.amount.toLocaleString()} recorded`
+      );
     },
-    [db, loadLedger]
+    [db, isUrdu, loadLedger, toast]
   );
 
   const { hasPinSet, isAdmin, isPinModalOpen, openPinModal, closePinModal } = useAdmin();
@@ -230,30 +234,15 @@ export default function BuyerLedgerScreen() {
     setIsDeletingBuyer(true);
     try {
       await deleteBuyer(db, buyerId, true);
-      Alert.alert(
-        isUrdu ? 'کامیابی' : 'Success',
-        isUrdu
-          ? 'گاہک اور اس کا تمام ریکارڈ کامیابی سے حذف کر دیا گیا ہے۔'
-          : 'Buyer and associated records deleted successfully.',
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              router.replace('/buyers');
-            },
-          },
-        ]
-      );
+      toast.success(isUrdu ? 'گاہک حذف کر دیا گیا' : 'Buyer deleted');
+      router.replace('/buyers');
     } catch (err: any) {
       logger.error('Failed to delete buyer:', err);
-      Alert.alert(
-        isUrdu ? 'خرابی' : 'Error',
-        err?.message || (isUrdu ? 'گاہک حذف کرنے میں ناکامی ہوئی' : 'Failed to delete buyer')
-      );
+      toast.error(err?.message || (isUrdu ? 'گاہک حذف کرنے میں ناکامی ہوئی' : 'Failed to delete buyer'));
     } finally {
       setIsDeletingBuyer(false);
     }
-  }, [buyerId, db, isUrdu]);
+  }, [buyerId, db, isUrdu, toast]);
 
   const handleDeleteBuyer = useCallback(() => {
     if (!buyer) return;
@@ -299,19 +288,16 @@ export default function BuyerLedgerScreen() {
               try {
                 await deleteBuyerPayment(db, payment.id);
                 await loadLedger();
-                Alert.alert(
-                  isUrdu ? 'کامیابی' : 'Success',
-                  isUrdu ? 'ادائیگی کا ریکارڈ حذف ہو گیا ہے۔' : 'Payment record deleted successfully.'
-                );
+                toast.success(isUrdu ? 'ادائیگی حذف ہو گئی' : 'Payment deleted');
               } catch (err: any) {
-                Alert.alert(isUrdu ? 'خرابی' : 'Error', err?.message || 'Failed to delete payment');
+                toast.error(err?.message || (isUrdu ? 'ادائیگی حذف نہیں ہو سکی' : 'Failed to delete payment'));
               }
             },
           },
         ]
       );
     },
-    [db, isUrdu, loadLedger]
+    [db, isUrdu, loadLedger, toast]
   );
 
   const handleDeleteMilkEntry = useCallback(
@@ -330,19 +316,16 @@ export default function BuyerLedgerScreen() {
               try {
                 await deleteMilkEntry(db, entry.id);
                 await loadLedger();
-                Alert.alert(
-                  isUrdu ? 'کامیابی' : 'Success',
-                  isUrdu ? 'دودھ کا اندراج حذف ہو گیا ہے۔' : 'Milk entry deleted successfully.'
-                );
+                toast.success(isUrdu ? 'اندراج حذف ہو گیا' : 'Milk entry deleted');
               } catch (err: any) {
-                Alert.alert(isUrdu ? 'خرابی' : 'Error', err?.message || 'Failed to delete milk entry');
+                toast.error(err?.message || (isUrdu ? 'اندراج حذف نہیں ہو سکا' : 'Failed to delete milk entry'));
               }
             },
           },
         ]
       );
     },
-    [db, isUrdu, loadLedger]
+    [db, isUrdu, loadLedger, toast]
   );
 
   const renderItem = useCallback(
@@ -503,9 +486,7 @@ export default function BuyerLedgerScreen() {
     </View>
   );
 
-  const listEmpty = loading ? (
-    <ActivityIndicator color={theme.primary} style={styles.loader} />
-  ) : (
+  const listEmpty = (
     <AppCard variant="default" padding="md">
       <ThemedText style={[styles.emptyText, { color: theme.textSecondary }]}>
         {isUrdu ? 'اس ہفتے کوئی فروخت نہیں' : 'No milk sales for this buyer this week.'}
@@ -566,6 +547,9 @@ export default function BuyerLedgerScreen() {
         </Pressable>
       </View>
 
+      {loading && !ledger ? (
+        <ListSkeleton />
+      ) : (
       <FlatList
         data={entries ?? []}
         keyExtractor={keyExtractor}
@@ -587,6 +571,7 @@ export default function BuyerLedgerScreen() {
           />
         }
       />
+      )}
 
       {buyer ? (
         <RecordPaymentModal
@@ -694,7 +679,6 @@ const styles = StyleSheet.create({
   paymentsCard: { gap: Spacing.xxs },
   milkCard: { paddingVertical: Spacing.sm },
   emptyText: { ...Typography.subhead, textAlign: 'center', paddingVertical: Spacing.sm },
-  loader: { marginTop: Spacing.xl },
   notFound: {
     flex: 1,
     alignItems: 'center',

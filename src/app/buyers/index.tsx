@@ -15,6 +15,8 @@ import {
   AppTextInput,
   FilterChip,
   LanguageToggleButton,
+  ListSkeleton,
+  useToast,
 } from '@/components/ui';
 import { BorderRadius, Layout, Spacing, Typography } from '@/constants/theme';
 import { useAdmin } from '@/context/admin-context';
@@ -33,6 +35,7 @@ export default function BuyersDirectoryScreen() {
   const theme = useTheme();
   const db = useSQLiteContext();
   const { isUrdu } = useLanguage();
+  const toast = useToast();
 
   const [loaded, setLoaded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -76,8 +79,9 @@ export default function BuyersDirectoryScreen() {
     async (name: string, phone?: string, address?: string, isDefault?: boolean) => {
       await addBuyer(db, name, phone, address, isDefault);
       await loadData();
+      toast.success(isUrdu ? `گاہک "${name}" شامل ہو گیا` : `Added buyer "${name}"`);
     },
-    [db, loadData]
+    [db, isUrdu, loadData, toast]
   );
 
   const openBuyer = useCallback((id: number) => {
@@ -127,17 +131,13 @@ export default function BuyersDirectoryScreen() {
       try {
         await deleteBuyer(db, buyerId, true);
         await loadData();
-        Alert.alert(
-          isUrdu ? 'کامیابی' : 'Success',
-          isUrdu
-            ? 'گاہک اور اس کے تمام ریکارڈز کامیابی سے حذف کر دیے گئے ہیں۔'
-            : 'Buyer and associated records deleted successfully.'
-        );
+        toast.success(isUrdu ? 'گاہک حذف کر دیا گیا' : 'Buyer deleted');
       } catch (err: any) {
-        Alert.alert(isUrdu ? 'خرابی' : 'Error', err?.message || 'Failed to delete buyer');
+        logger.error('Failed to delete buyer:', err);
+        toast.error(isUrdu ? 'گاہک حذف نہیں ہو سکا' : err?.message || 'Failed to delete buyer');
       }
     },
-    [db, isUrdu, loadData]
+    [db, isUrdu, loadData, toast]
   );
 
   const handleDeleteBuyer = useCallback(
@@ -291,6 +291,9 @@ export default function BuyersDirectoryScreen() {
         </View>
       </View>
 
+      {!loaded ? (
+        <ListSkeleton />
+      ) : (
       <FlatList
         data={filteredBuyers}
         keyExtractor={keyExtractor}
@@ -315,6 +318,7 @@ export default function BuyersDirectoryScreen() {
           />
         }
       />
+      )}
 
       <AddBuyerModal
         visible={isAddBuyerModalOpen}

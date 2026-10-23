@@ -1,8 +1,7 @@
-import { useFocusEffect } from 'expo-router';
+import { Redirect, useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
-import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { memo, useCallback, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
   Alert,
   FlatList,
   Pressable,
@@ -26,8 +25,10 @@ import {
   AppTextInput,
   IconBubble,
   LanguageToggleButton,
+  ListSkeleton,
+  useToast,
 } from '@/components/ui';
-import { BorderRadius, Layout, Shadows, Spacing, Typography } from '@/constants/theme';
+import { BorderRadius, Layout, Spacing, Typography } from '@/constants/theme';
 import { useLanguage } from '@/context/language-context';
 import {
   AnimalSpecies,
@@ -46,6 +47,25 @@ import {
 import { useTheme } from '@/hooks/use-theme';
 import { genderLabel, type HerdLang, speciesLabel, statusLabel } from '@/utils/herd-labels';
 import { logger } from '@/utils/logger';
+
+/**
+ * ============================================================================
+ * MAWESHI (HERD & LIVESTOCK MANAGEMENT) - TEMPORARILY DISABLED
+ * ============================================================================
+ * Note: Abi ke liye comment / disable kar diya gaya hai, future mein use karne ke liye.
+ *
+ * To re-enable in the future:
+ * 1. Change the default export to `export default LivestockScreen;`
+ *    and remove `export default function DisabledLivestockScreen()`.
+ * 2. In `mobile/src/components/app-tabs.tsx`, uncomment:
+ *    `<NativeTabs.Trigger name="livestock">...</NativeTabs.Trigger>`
+ * 3. In `mobile/src/components/app-tabs.web.tsx`, uncomment:
+ *    `<TabTrigger name="livestock" href="/livestock" asChild>...</TabTrigger>`
+ * ============================================================================
+ */
+export default function DisabledLivestockScreen() {
+  return <Redirect href="/" />;
+}
 
 const EMPTY_SUMMARY: LivestockSummary = {
   totalAnimals: 0,
@@ -108,7 +128,7 @@ const AnimalRow = memo(function AnimalRow({
 // ---------------------------------------------------------------------------
 // Screen
 // ---------------------------------------------------------------------------
-export default function LivestockScreen() {
+export function LivestockScreen() {
   const db = useSQLiteContext();
   const theme = useTheme();
   const { isUrdu } = useLanguage();
@@ -124,22 +144,7 @@ export default function LivestockScreen() {
 
   const [isAddAnimalOpen, setIsAddAnimalOpen] = useState(false);
   const [isLogActivityOpen, setIsLogActivityOpen] = useState(false);
-  const [feedbackToast, setFeedbackToast] = useState<string | null>(null);
-
-  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(
-    () => () => {
-      if (toastTimer.current) clearTimeout(toastTimer.current);
-    },
-    []
-  );
-
-  const showToast = useCallback((msg: string) => {
-    if (toastTimer.current) clearTimeout(toastTimer.current);
-    setFeedbackToast(msg);
-    toastTimer.current = setTimeout(() => setFeedbackToast(null), 3000);
-  }, []);
+  const toast = useToast();
 
   const loadLivestockData = useCallback(async () => {
     try {
@@ -174,23 +179,23 @@ export default function LivestockScreen() {
   const handleSaveAnimal = useCallback(
     async (newAnimal: NewLivestockAnimal) => {
       await insertLivestockAnimal(db, newAnimal);
-      showToast(
+      toast.success(
         isUrdu ? `جانور ${newAnimal.tag_number} درج ہو گیا` : `Registered animal ${newAnimal.tag_number}.`
       );
       loadLivestockData();
     },
-    [db, isUrdu, loadLivestockData, showToast]
+    [db, isUrdu, loadLivestockData, toast]
   );
 
   const handleSaveActivity = useCallback(
     async (newActivity: NewLivestockActivity) => {
       await insertLivestockActivity(db, newActivity);
-      showToast(
+      toast.success(
         isUrdu ? `سرگرمی "${newActivity.title}" درج ہو گئی` : `Recorded activity "${newActivity.title}".`
       );
       loadLivestockData();
     },
-    [db, isUrdu, loadLivestockData, showToast]
+    [db, isUrdu, loadLivestockData, toast]
   );
 
   const handleDeleteAnimal = useCallback(
@@ -206,15 +211,22 @@ export default function LivestockScreen() {
             text: isUrdu ? 'ہٹاؤ' : 'Remove',
             style: 'destructive',
             onPress: async () => {
-              await deleteLivestockAnimal(db, animal.id);
-              showToast(isUrdu ? `جانور ${animal.tag_number} ہٹا دتا گیا` : `Removed animal ${animal.tag_number}.`);
-              loadLivestockData();
+              try {
+                await deleteLivestockAnimal(db, animal.id);
+                toast.success(
+                  isUrdu ? `جانور ${animal.tag_number} ہٹا دتا گیا` : `Removed animal ${animal.tag_number}.`
+                );
+                loadLivestockData();
+              } catch (err) {
+                logger.error('Failed to remove animal:', err);
+                toast.error(isUrdu ? 'جانور ہٹایا نہیں جا سکیا' : 'Could not remove animal');
+              }
             },
           },
         ]
       );
     },
-    [db, isUrdu, loadLivestockData, showToast]
+    [db, isUrdu, loadLivestockData, toast]
   );
 
   const filteredAnimals = useMemo(() => {
@@ -378,17 +390,8 @@ export default function LivestockScreen() {
 
   return (
     <SafeAreaView edges={['top']} style={[styles.safeArea, { backgroundColor: theme.background }]}>
-      {feedbackToast ? (
-        <View style={[styles.toastContainer, { backgroundColor: theme.primaryDark }]}>
-          <AppIcon name="check" size={16} color="#FFFFFF" />
-          <ThemedText style={styles.toastText}>{feedbackToast}</ThemedText>
-        </View>
-      ) : null}
-
       {loading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={theme.primary} />
-        </View>
+        <ListSkeleton />
       ) : (
         <FlatList
           data={filteredAnimals}
@@ -430,22 +433,6 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   flexShrink: { flexShrink: 1 },
   pressed: { opacity: 0.7 },
-  toastContainer: {
-    position: 'absolute',
-    top: 50,
-    left: 20,
-    right: 20,
-    zIndex: 999,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: BorderRadius.md,
-    ...Shadows.md,
-  },
-  toastText: { color: '#FFFFFF', fontSize: Typography.subhead.fontSize, fontWeight: '600', flexShrink: 1 },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   listContent: { paddingHorizontal: Spacing.lg, paddingTop: Spacing.sm },
   headerContainer: { gap: Spacing.md, marginBottom: Spacing.sm },
   brandRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: Spacing.sm },
@@ -478,3 +465,5 @@ const styles = StyleSheet.create({
   animalSubtext: { fontSize: Typography.caption.fontSize },
   deleteBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
 });
+
+

@@ -46,7 +46,7 @@ import {
   serverTroubleMessage,
 } from './network-errors';
 import { retryDelayMs } from './retry-schedule';
-import { FarmProfile, SyncResult, SyncStatus } from './sync-types';
+import { BusinessType, FarmProfile, SyncResult, SyncStatus, UserRole } from './sync-types';
 
 export interface AuthResult {
   success: boolean;
@@ -79,6 +79,7 @@ export interface RegisterInput {
   password: string;
   phone?: string;
   defaultMilkRate?: number;
+  businessType?: BusinessType;
 }
 
 interface ServerError {
@@ -115,6 +116,8 @@ interface SyncContextValue {
   isOfflineMode: boolean;
   setOfflineMode: (value: boolean) => void;
   farm: FarmProfile | null;
+  role: UserRole;
+  businessType: BusinessType;
   isSessionExpired: boolean;
   error: string | null;
   apiUrl: string;
@@ -300,7 +303,10 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     ): Promise<AuthResult> => {
       const previousFarmId = await getSyncFarmId(db);
 
-      if (previousFarmId && previousFarmId !== data.farm.id) {
+      const previousUserId = await getAppSetting(db, 'sync_user_id', '');
+      const nextUserId = data.farm.userId || data.farm.id;
+      const differentPerson = Boolean(previousUserId && previousUserId !== nextUserId);
+      if (previousFarmId && (previousFarmId !== data.farm.id || differentPerson)) {
         // This phone holds another farm's data. Pushing it into this account (and reusing the old
         // sync cursor) would mix farms, so require an explicit confirmation to start clean.
         if (!options?.replaceLocalData) {
@@ -321,6 +327,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       await setAuthToken(data.token);
       await setStoredFarmProfile(data.farm);
       await setSyncFarmId(db, data.farm.id);
+      await setAppSetting(db, 'sync_user_id', data.farm.userId || data.farm.id);
       setSignedIn(true);
       setFarm(data.farm);
       sessionExpiredRef.current = false;
@@ -333,6 +340,12 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       if (data.farm.phone) await setAppSetting(db, 'admin_phone', data.farm.phone);
       if (data.farm.defaultMilkRate) {
         await setAppSetting(db, 'default_milk_rate', String(data.farm.defaultMilkRate));
+      }
+      if (data.farm.businessType) {
+        await setAppSetting(db, 'business_type', data.farm.businessType);
+      }
+      if (data.farm.role) {
+        await setAppSetting(db, 'user_role', data.farm.role);
       }
       await setAppSetting(db, 'is_registered', '1');
       await reloadSettings();
@@ -556,7 +569,27 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       }
 
       const token = await getAuthToken();
-      const storedFarm = await getStoredFarmProfile();
+      let storedFarm = await getStoredFarmProfile();
+      if (token && storedFarm && !storedFarm.userId) {
+        try {
+          const res = await fetchWithTimeout(getApiEndpoint('/auth/me'), {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (res.ok) {
+            const body = (await res.json()) as { user?: { id?: string; name?: string }; role?: FarmProfile['role'] };
+            storedFarm = {
+              ...storedFarm,
+              userId: body.user?.id,
+              role: body.role || storedFarm.role,
+              accountName: storedFarm.accountName || body.user?.name,
+            };
+            await setStoredFarmProfile(storedFarm);
+            if (storedFarm.userId) await setAppSetting(db, 'sync_user_id', storedFarm.userId);
+          }
+        } catch {
+          // The saved profile still works; the next sign-in fills in the person id.
+        }
+      }
       if (!isMounted) return;
       setSignedIn(Boolean(token));
       setFarm(storedFarm);
@@ -610,6 +643,9 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     };
   }, [isSignedIn, refreshStats, scheduleSync, syncNow]);
 
+  const role: UserRole = farm?.role ?? 'owner';
+  const businessType: BusinessType = farm?.businessType ?? 'farm';
+
   return (
     <SyncContext.Provider
       value={{
@@ -622,6 +658,8 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         isOfflineMode,
         setOfflineMode,
         farm,
+        role,
+        businessType,
         isSessionExpired,
         error,
         apiUrl,

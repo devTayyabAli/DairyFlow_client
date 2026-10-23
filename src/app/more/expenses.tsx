@@ -1,10 +1,9 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { router, useFocusEffect } from 'expo-router';
+import { Redirect, router, useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -22,8 +21,11 @@ import {
   AppCard,
   AppIcon,
   AppTextInput,
+  BusyOverlay,
   FilterChip,
   HeroFinancialCard,
+  ListSkeleton,
+  useToast,
 } from '@/components/ui';
 import { BorderRadius, Layout, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useLanguage } from '@/context/language-context';
@@ -39,6 +41,7 @@ import {
 } from '@/db/database';
 import { useReportBrand } from '@/hooks/use-report-brand';
 import { useTheme } from '@/hooks/use-theme';
+import { useSync } from '@/sync';
 import { logger } from '@/utils/logger';
 import { exportPdf } from '@/utils/pdf-export';
 import { buildExpenseReportHtml, reportFileName } from '@/utils/pdf-report';
@@ -63,10 +66,17 @@ function formatLocalDate(d: Date): string {
 }
 
 export default function ExpensesScreen() {
+  const { role } = useSync();
+  if (role === 'collector' || role === 'farmer') return <Redirect href="/collection" />;
+  return <ExpensesScreenBody />;
+}
+
+function ExpensesScreenBody() {
   const db = useSQLiteContext();
   const theme = useTheme();
   const { isUrdu } = useLanguage();
   const { brand, lang } = useReportBrand();
+  const toast = useToast();
 
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [summary, setSummary] = useState<ExpenseSummary | null>(null);
@@ -77,7 +87,6 @@ export default function ExpensesScreen() {
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [expenseToEdit, setExpenseToEdit] = useState<Expense | null>(null);
-  const [feedbackToast, setFeedbackToast] = useState<string | null>(null);
   const [exporting, setExporting] = useState<boolean>(false);
 
   const [datePreset, setDatePreset] = useState<DatePreset>('week');
@@ -87,13 +96,11 @@ export default function ExpensesScreen() {
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
 
-  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasFocusedOnce = useRef(false);
 
   useEffect(
     () => () => {
-      if (toastTimer.current) clearTimeout(toastTimer.current);
       if (searchTimer.current) clearTimeout(searchTimer.current);
     },
     []
@@ -132,12 +139,6 @@ export default function ExpensesScreen() {
         return {};
     }
   }, [datePreset, customStartDate, customEndDate]);
-
-  const showToast = useCallback((msg: string) => {
-    if (toastTimer.current) clearTimeout(toastTimer.current);
-    setFeedbackToast(msg);
-    toastTimer.current = setTimeout(() => setFeedbackToast(null), 3000);
-  }, []);
 
   const reload = useCallback(() => setRefreshTrigger((p) => p + 1), []);
 
@@ -225,13 +226,15 @@ export default function ExpensesScreen() {
     async (id: number) => {
       try {
         await deleteExpense(db, id);
-        showToast(isUrdu ? 'خرچہ مٹا دتا گیا' : 'Expense record deleted.');
+        toast.success(isUrdu ? 'خرچہ مٹا دتا گیا' : 'Expense deleted');
         reload();
       } catch (err) {
-        showToast(err instanceof Error ? err.message : 'Failed to delete expense.');
+        toast.error(
+          err instanceof Error ? err.message : isUrdu ? 'خرچہ مٹایا نہیں جا سکیا' : 'Failed to delete expense'
+        );
       }
     },
-    [db, isUrdu, reload, showToast]
+    [db, isUrdu, reload, toast]
   );
 
   const handleEditExpense = useCallback((exp: Expense) => {
@@ -245,12 +248,14 @@ export default function ExpensesScreen() {
   }, []);
 
   const handleModalSuccess = useCallback(() => {
-    showToast(
-      expenseToEdit ? 'Expense updated successfully.' : 'Expense recorded successfully.'
+    toast.success(
+      expenseToEdit
+        ? isUrdu ? 'خرچہ اپڈیٹ ہو گیا' : 'Expense updated'
+        : isUrdu ? 'خرچہ درج ہو گیا' : 'Expense recorded'
     );
     setExpenseToEdit(null);
     reload();
-  }, [expenseToEdit, reload, showToast]);
+  }, [expenseToEdit, isUrdu, reload, toast]);
 
   const handleResetFilters = useCallback(() => {
     setDatePreset('week');
@@ -271,17 +276,15 @@ export default function ExpensesScreen() {
   const handleExportPdf = useCallback(async () => {
     if (exporting) return;
     try {
-      setExporting(true);
       if (expenses.length === 0) {
-        Alert.alert(
-          isUrdu ? 'کوئی خرچہ نہیں' : 'No expenses',
+        toast.info(
           isUrdu
             ? 'موجودہ فلٹر وچ رپورٹ لئی کوئی خرچہ نہیں۔'
-            : 'There are no expenses matching your current filter to put in a report.',
-          [{ text: 'OK' }]
+            : 'No expenses match your filter to put in a report.'
         );
         return;
       }
+      setExporting(true);
 
       // The list is capped for speed; the report must contain every matching expense.
       const dbCategory =
@@ -317,26 +320,22 @@ export default function ExpensesScreen() {
         reportFileName(`expenses_${datePreset}`, dateBounds.startDate ?? all[0]?.date, dateBounds.endDate ?? all[all.length - 1]?.date),
         isUrdu ? 'اخراجات رپورٹ' : 'Expense report'
       );
-      showToast(
-        shared
-          ? isUrdu
-            ? 'PDF رپورٹ تیار اے'
-            : `PDF report ready (${all.length} expenses)`
-          : isUrdu
-            ? 'اس ڈیوائس تے شیئرنگ دستیاب نہیں'
-            : 'Sharing is not available on this device'
-      );
+      if (shared) {
+        toast.success(isUrdu ? 'PDF رپورٹ تیار اے' : `PDF report ready (${all.length} expenses)`);
+      } else {
+        toast.info(isUrdu ? 'اس ڈیوائس تے شیئرنگ دستیاب نہیں' : 'Sharing is not available on this device');
+      }
     } catch (err) {
       logger.error('Failed to create expense PDF:', err);
-      Alert.alert(
-        isUrdu ? 'PDF نہیں بن سکی' : 'Could not create PDF',
-        err instanceof Error ? err.message : isUrdu ? 'دوبارہ کوشش کرو۔' : 'Please try again.',
-        [{ text: 'OK' }]
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : isUrdu ? 'PDF نہیں بن سکی۔ دوبارہ کوشش کرو۔' : 'Could not create PDF. Please try again.'
       );
     } finally {
       setExporting(false);
     }
-  }, [brand, datePreset, dateBounds.endDate, dateBounds.startDate, db, expenses.length, exporting, isUrdu, lang, searchQuery, selectedCategory, showToast]);
+  }, [brand, datePreset, dateBounds.endDate, dateBounds.startDate, db, expenses.length, exporting, isUrdu, lang, searchQuery, selectedCategory, toast]);
 
   const handleBack = useCallback(() => {
     if (router.canGoBack()) router.back();
@@ -575,13 +574,6 @@ export default function ExpensesScreen() {
 
   return (
     <SafeAreaView edges={['top']} style={[styles.safeArea, { backgroundColor: theme.background }]}>
-      {feedbackToast ? (
-        <View style={[styles.toastContainer, { backgroundColor: theme.primaryDark }]}>
-          <AppIcon name="check" size={16} color="#FFFFFF" />
-          <ThemedText style={styles.toastText}>{feedbackToast}</ThemedText>
-        </View>
-      ) : null}
-
       {/* Header */}
       <View style={styles.header}>
         <Pressable
@@ -625,9 +617,7 @@ export default function ExpensesScreen() {
       </View>
 
       {loading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={theme.primary} />
-        </View>
+        <ListSkeleton />
       ) : (
         <SectionList
           sections={sections}
@@ -668,6 +658,8 @@ export default function ExpensesScreen() {
         <ThemedText style={styles.fabText}>{isUrdu ? 'خرچہ پاؤ' : 'Add expense'}</ThemedText>
       </Pressable>
 
+      <BusyOverlay visible={exporting} message={isUrdu ? 'PDF بن رہی اے…' : 'Creating PDF…'} />
+
       <AddExpenseModal
         visible={isAddModalOpen}
         expenseToEdit={expenseToEdit}
@@ -682,21 +674,6 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1 },
   flex: { flex: 1 },
   pressed: { opacity: 0.7 },
-  toastContainer: {
-    position: 'absolute',
-    top: 50,
-    left: 20,
-    right: 20,
-    zIndex: 999,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: BorderRadius.md,
-    ...Shadows.md,
-  },
-  toastText: { color: '#FFFFFF', fontSize: Typography.subhead.fontSize, fontWeight: '600', flexShrink: 1 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -715,7 +692,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   listContent: { paddingHorizontal: Spacing.lg, paddingTop: Spacing.xs },
   headerWrap: { gap: Spacing.md, marginBottom: Spacing.xs },
   chipsRow: { flexDirection: 'row', gap: Spacing.xs, paddingRight: Spacing.lg },

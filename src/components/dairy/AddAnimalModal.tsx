@@ -15,6 +15,7 @@ import {
   AppIcon,
   AppTextInput,
   FilterChip,
+  useToast,
 } from '@/components/ui';
 import { BorderRadius, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useLanguage } from '@/context/language-context';
@@ -46,6 +47,7 @@ export function AddAnimalModal({
   const { isUrdu } = useLanguage();
   const lang = isUrdu ? 'ur' : 'en';
   const tr = (en: string, ur: string) => (isUrdu ? ur : en);
+  const toast = useToast();
 
   const [tagNumber, setTagNumber] = useState('');
   const [name, setName] = useState('');
@@ -70,6 +72,7 @@ export function AddAnimalModal({
   };
 
   const handleClose = () => {
+    if (saving) return;
     resetForm();
     onClose();
   };
@@ -91,6 +94,7 @@ export function AddAnimalModal({
   };
 
   const handleSubmit = async () => {
+    if (saving) return;
     if (!tagNumber.trim()) {
       setError(
         tr(
@@ -115,11 +119,13 @@ export function AddAnimalModal({
         notes: notes.trim() || undefined,
       });
 
-      handleClose();
+      resetForm();
+      onClose();
     } catch (err) {
       setError(
         err instanceof Error ? err.message : tr('Failed to register animal.', 'جانور درج نہیں ہو سکیا۔')
       );
+      toast.error(tr('Could not register animal', 'جانور درج نہیں ہو سکیا'));
     } finally {
       setSaving(false);
     }
@@ -137,6 +143,7 @@ export function AddAnimalModal({
         <Pressable
           style={styles.backdrop}
           onPress={handleClose}
+          disabled={saving}
           accessibilityRole="button"
           accessibilityLabel={tr('Close', 'بند کرو')}
         />
@@ -152,6 +159,7 @@ export function AddAnimalModal({
             </View>
             <Pressable
               onPress={handleClose}
+              disabled={saving}
               hitSlop={8}
               accessibilityRole="button"
               accessibilityLabel={tr('Close', 'بند کرو')}
@@ -301,6 +309,7 @@ export function AddAnimalModal({
               size="md"
               title={tr('Cancel', 'منسوخ')}
               onPress={handleClose}
+              disabled={saving}
               style={styles.cancelBtn}
             />
             <AppButton

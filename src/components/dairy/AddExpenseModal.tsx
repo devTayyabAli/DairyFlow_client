@@ -19,6 +19,7 @@ import { AppButton } from '@/components/ui/button';
 import { AppCard } from '@/components/ui/card';
 import { FilterChip } from '@/components/ui/chip';
 import { AppIcon, IconBubble } from '@/components/ui/icon';
+import { useToast } from '@/components/ui/toast';
 import { AppTextInput } from '@/components/ui/text-input';
 import { BorderRadius, Layout, Spacing, Typography } from '@/constants/theme';
 import {
@@ -70,6 +71,7 @@ export function AddExpenseModal({
   const db = useSQLiteContext();
   const theme = useTheme();
   const { isUrdu } = useLanguage();
+  const toast = useToast();
   const tr = (en: string, ur: string) => (isUrdu ? ur : en);
 
   const unitLabelFor = (u: string) =>
@@ -176,6 +178,7 @@ export function AddExpenseModal({
   };
 
   const handleClose = () => {
+    if (isSubmitting) return;
     Keyboard.dismiss();
     // If user entered significant data, warn before discarding
     if ((title.trim() || amount.trim()) && !isSubmitting) {
@@ -314,7 +317,9 @@ export function AddExpenseModal({
       onClose();
     } catch (err: any) {
       setIsSubmitting(false);
-      setGeneralError(err?.message || tr('Failed to save expense record.', 'خرچے کا ریکارڈ محفوظ نہیں ہو سکا۔'));
+      const message = err?.message || tr('Failed to save expense record.', 'خرچے کا ریکارڈ محفوظ نہیں ہو سکا۔');
+      setGeneralError(message);
+      toast.error(message);
     }
   };
 
@@ -344,6 +349,7 @@ export function AddExpenseModal({
           <View style={[styles.headerBar, { backgroundColor: theme.card, borderColor: theme.border }]}>
             <Pressable
               onPress={handleClose}
+              disabled={isSubmitting}
               hitSlop={12}
               accessibilityRole="button"
               accessibilityLabel={tr('Close add expense modal', 'خرچہ شامل کرنے کی ونڈو بند کریں')}

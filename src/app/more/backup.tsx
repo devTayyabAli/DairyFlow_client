@@ -18,12 +18,11 @@
  */
 
 import { Ionicons } from '@expo/vector-icons';
-import { router, useFocusEffect } from 'expo-router';
+import { Redirect, router, useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Modal,
   Pressable,
   RefreshControl,
@@ -40,8 +39,10 @@ import {
   AppCard,
   AppIcon,
   AppTextInput,
+  BusyOverlay,
   IconBubble,
   StatCard,
+  useToast,
 } from '@/components/ui';
 import { BorderRadius, Layout, Spacing, Typography } from '@/constants/theme';
 import { useAdmin } from '@/context/admin-context';
@@ -57,6 +58,7 @@ import {
 } from '@/db/database';
 import { useReportBrand } from '@/hooks/use-report-brand';
 import { useTheme } from '@/hooks/use-theme';
+import { useSync } from '@/sync';
 import {
   DairyFlowBackupEnvelope,
   parseAndValidateBackupJson,
@@ -87,10 +89,17 @@ interface LiveDbStats {
 }
 
 export default function BackupScreen() {
+  const { role } = useSync();
+  if (role === 'collector' || role === 'farmer') return <Redirect href="/collection" />;
+  return <BackupScreenBody />;
+}
+
+function BackupScreenBody() {
   const db = useSQLiteContext();
   const theme = useTheme();
   const { isUrdu } = useLanguage();
   const { brand, lang } = useReportBrand();
+  const toast = useToast();
 
   // Multi-Farm Admin Profile from context
   const {
@@ -133,28 +142,12 @@ export default function BackupScreen() {
   const [pickingFile, setPickingFile] = useState<boolean>(false);
   const [restoringData, setRestoringData] = useState<boolean>(false);
 
-  // Feedback toast
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [readingFile, setReadingFile] = useState<boolean>(false);
 
   // Restore Confirmation Modal State
   const [restoreModalVisible, setRestoreModalVisible] = useState<boolean>(false);
   const [pendingBackupEnvelope, setPendingBackupEnvelope] = useState<DairyFlowBackupEnvelope | null>(null);
   const [selectedFileName, setSelectedFileName] = useState<string>('');
-
-  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(
-    () => () => {
-      if (toastTimer.current) clearTimeout(toastTimer.current);
-    },
-    []
-  );
-
-  const showToast = useCallback((msg: string) => {
-    if (toastTimer.current) clearTimeout(toastTimer.current);
-    setToastMessage(msg);
-    toastTimer.current = setTimeout(() => setToastMessage(null), 4000);
-  }, []);
 
   const goBack = useCallback(() => {
     if (router.canGoBack()) router.back();
@@ -170,13 +163,9 @@ export default function BackupScreen() {
       });
       setFarmNameEdit(null);
       setDefaultRateEdit(null);
-      showToast(isUrdu ? 'فارم سیٹنگز تے دودھ دا ریٹ محفوظ ہو گیا۔' : 'Farm settings & standard rate saved.');
+      toast.success(isUrdu ? 'فارم سیٹنگز تے دودھ دا ریٹ محفوظ ہو گیا۔' : 'Farm settings & standard rate saved.');
     } catch {
-      Alert.alert(
-        isUrdu ? 'سیٹنگز خرابی' : 'Save Error',
-        isUrdu ? 'سیٹنگز محفوظ کرن وچ مسئلہ پیش آیا۔' : 'Could not save farm settings.',
-        [{ text: 'OK' }]
-      );
+      toast.error(isUrdu ? 'سیٹنگز محفوظ کرن وچ مسئلہ پیش آیا۔' : 'Could not save farm settings.');
     } finally {
       setSavingSettings(false);
     }
@@ -226,23 +215,19 @@ export default function BackupScreen() {
   // A. PDF REPORTS (all-time)
   // -------------------------------------------------------------------------
   const finishPdf = (shared: boolean, count: number, noun: string) => {
-    showToast(
-      shared
-        ? isUrdu
-          ? 'PDF رپورٹ تیار اے'
-          : `PDF report ready (${count} ${noun})`
-        : isUrdu
-          ? 'اس ڈیوائس تے شیئرنگ دستیاب نہیں'
-          : 'Sharing is not available on this device'
-    );
+    if (shared) {
+      toast.success(isUrdu ? 'PDF رپورٹ تیار اے' : `PDF report ready (${count} ${noun})`);
+    } else {
+      toast.info(isUrdu ? 'اس ڈیوائس تے شیئرنگ دستیاب نہیں' : 'Sharing is not available on this device');
+    }
   };
 
   const pdfFailed = (err: unknown) => {
     logger.error('Failed to create PDF report:', err);
-    Alert.alert(
-      isUrdu ? 'PDF نہیں بن سکی' : 'Could not create PDF',
-      err instanceof Error ? err.message : isUrdu ? 'دوبارہ کوشش کرو۔' : 'Please try again.',
-      [{ text: 'OK' }]
+    toast.error(
+      err instanceof Error
+        ? err.message
+        : isUrdu ? 'PDF نہیں بن سکی۔ دوبارہ کوشش کرو۔' : 'Could not create PDF. Please try again.'
     );
   };
 
@@ -255,11 +240,7 @@ export default function BackupScreen() {
       );
 
       if (entries.length === 0) {
-        Alert.alert(
-          isUrdu ? 'کوئی ریکارڈ نہیں' : 'No milk records',
-          isUrdu ? 'رپورٹ لئی کوئی دودھ دا ریکارڈ نہیں۔' : 'There are no recorded milk sales to put in a report.',
-          [{ text: 'OK' }]
-        );
+        toast.info(isUrdu ? 'رپورٹ لئی کوئی دودھ دا ریکارڈ نہیں۔' : 'No milk sales recorded to put in a report.');
         return;
       }
 
@@ -289,11 +270,7 @@ export default function BackupScreen() {
       const buyersWithStats = await getBuyersWithStats(db);
 
       if (buyersWithStats.length === 0) {
-        Alert.alert(
-          isUrdu ? 'کوئی گاہک نہیں' : 'No buyers registered',
-          isUrdu ? 'رپورٹ لئی کوئی گاہک نہیں۔' : 'There are no registered buyers to put in a report.',
-          [{ text: 'OK' }]
-        );
+        toast.info(isUrdu ? 'رپورٹ لئی کوئی گاہک نہیں۔' : 'No registered buyers to put in a report.');
         return;
       }
 
@@ -318,11 +295,7 @@ export default function BackupScreen() {
       const expenses = await getFilteredExpenses(db, { limit: 10000 });
 
       if (expenses.length === 0) {
-        Alert.alert(
-          isUrdu ? 'کوئی خرچہ نہیں' : 'No expenses recorded',
-          isUrdu ? 'رپورٹ لئی کوئی خرچہ نہیں۔' : 'There are no recorded farm expenses to put in a report.',
-          [{ text: 'OK' }]
-        );
+        toast.info(isUrdu ? 'رپورٹ لئی کوئی خرچہ نہیں۔' : 'No farm expenses recorded to put in a report.');
         return;
       }
 
@@ -370,17 +343,21 @@ export default function BackupScreen() {
 
       const { buyersCount, milkEntriesCount, expensesCount } = backupEnvelope.metadata;
       if (shared) {
-        showToast(
-          `Backup created: ${buyersCount} buyers, ${milkEntriesCount} records, ${expensesCount} expenses.`
+        toast.success(
+          isUrdu
+            ? `بیک اپ بن گیا: ${buyersCount} گاہک، ${milkEntriesCount} ریکارڈ، ${expensesCount} خرچے۔`
+            : `Backup created: ${buyersCount} buyers, ${milkEntriesCount} records, ${expensesCount} expenses.`
         );
       } else {
-        showToast(`Backup saved to cache: ${saved.filename}`);
+        toast.info(
+          isUrdu ? `بیک اپ کیش وچ محفوظ ہو گیا: ${saved.filename}` : `Backup saved to cache: ${saved.filename}`
+        );
       }
     } catch (err) {
-      Alert.alert(
-        'Backup Creation Failed',
-        err instanceof Error ? err.message : 'Unable to create application backup.',
-        [{ text: 'OK' }]
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : isUrdu ? 'بیک اپ نہیں بن سکیا۔' : 'Unable to create application backup.'
       );
     } finally {
       setCreatingBackup(false);
@@ -401,6 +378,7 @@ export default function BackupScreen() {
         return;
       }
 
+      setReadingFile(true);
       // Read file text
       const content = await readBackupFile(pickResult.uri);
 
@@ -411,14 +389,15 @@ export default function BackupScreen() {
       setPendingBackupEnvelope(envelope);
       setRestoreModalVisible(true);
     } catch (err) {
-      Alert.alert(
-        'Invalid Backup File',
+      toast.error(
         err instanceof Error
           ? err.message
-          : 'The selected file is not a valid DairyFlow backup. No changes were made to your database.',
-        [{ text: 'OK' }]
+          : isUrdu
+            ? 'چنی گئی فائل درست ڈیری فلو بیک اپ نہیں۔ ڈیٹا وچ کوئی تبدیلی نہیں ہوئی۔'
+            : 'Not a valid DairyFlow backup. No changes were made to your data.'
       );
     } finally {
+      setReadingFile(false);
       setPickingFile(false);
     }
   };
@@ -436,17 +415,18 @@ export default function BackupScreen() {
       // Refresh displayed database numbers
       await loadDatabaseStats();
 
-      Alert.alert(
-        'Restore Complete',
-        `Successfully restored ${result.restoredCounts.buyers} buyers, ${result.restoredCounts.milkEntries} milk records, and ${result.restoredCounts.expenses} expenses.\n\nAll tables have been synchronized.`,
-        [{ text: 'Great' }]
+      toast.success(
+        isUrdu
+          ? `ڈیٹا بحال ہو گیا: ${result.restoredCounts.buyers} گاہک، ${result.restoredCounts.milkEntries} ریکارڈ، ${result.restoredCounts.expenses} خرچے۔`
+          : `Data restored: ${result.restoredCounts.buyers} buyers, ${result.restoredCounts.milkEntries} milk records, ${result.restoredCounts.expenses} expenses.`,
+        { duration: 5000 }
       );
-      showToast('Database restored successfully.');
     } catch (err) {
-      Alert.alert(
-        'Restore Failed (Rolled Back)',
-        `Could not restore backup:\n${err instanceof Error ? err.message : String(err)}\n\nYour original database contents were not altered and remain protected by transaction rollback.`,
-        [{ text: 'OK' }]
+      toast.error(
+        isUrdu
+          ? `بحالی ناکام، پرانا ڈیٹا محفوظ اے: ${err instanceof Error ? err.message : String(err)}`
+          : `Restore failed, your data was not changed: ${err instanceof Error ? err.message : String(err)}`,
+        { duration: 6000 }
       );
     } finally {
       setRestoringData(false);
@@ -475,16 +455,21 @@ export default function BackupScreen() {
     pickingFile ||
     restoringData;
 
+  let busyMessage: string | null = null;
+  if (restoringData) {
+    busyMessage = isUrdu
+      ? 'ڈیٹا بحال ہو رہیا اے… ایپ کھلی رکھو'
+      : 'Restoring your data… please keep the app open';
+  } else if (creatingBackup) {
+    busyMessage = isUrdu ? 'بیک اپ بن رہیا اے…' : 'Creating backup…';
+  } else if (readingFile) {
+    busyMessage = isUrdu ? 'فائل پڑھی تے جانچی جا رہی اے…' : 'Reading and checking file…';
+  } else if (exportingMilk || exportingBuyers || exportingExpenses) {
+    busyMessage = isUrdu ? 'PDF بن رہی اے…' : 'Creating PDF…';
+  }
+
   return (
     <SafeAreaView edges={['top']} style={[styles.safeArea, { backgroundColor: theme.background }]}>
-      {/* Toast Feedback */}
-      {toastMessage ? (
-        <View style={[styles.toastContainer, { backgroundColor: theme.primaryDark }]}>
-          <AppIcon name="check" size={16} color="#FFFFFF" />
-          <ThemedText style={styles.toastText}>{toastMessage}</ThemedText>
-        </View>
-      ) : null}
-
       {/* Screen Header */}
       <View style={styles.header}>
         <Pressable
@@ -941,13 +926,15 @@ export default function BackupScreen() {
         </View>
       </Modal>
 
+      <BusyOverlay visible={busyMessage !== null} message={busyMessage ?? ''} />
+
       {/* Admin PIN Setup / Change Modal */}
       <AdminPinModal
         visible={isPinModalOpen}
         onClose={() => setIsPinModalOpen(false)}
         mode={pinModalMode}
         onSuccess={() => {
-          showToast(
+          toast.success(
             isUrdu
               ? 'ایڈمن پن کامیابی نال سیٹ ہو گیا۔'
               : 'Admin PIN configured successfully.'
@@ -1111,30 +1098,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 2,
     lineHeight: 16,
-  },
-  toastContainer: {
-    position: 'absolute',
-    top: 50,
-    left: Spacing.lg,
-    right: Spacing.lg,
-    zIndex: 9999,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-    paddingVertical: Spacing.sm,
-    paddingHorizontal: Spacing.md,
-    borderRadius: BorderRadius.md,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 5,
-  },
-  toastText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
-    flex: 1,
   },
   modalOverlay: {
     flex: 1,

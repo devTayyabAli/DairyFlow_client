@@ -6,7 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { AdminPinModal } from '@/components/dairy/AdminPinModal';
 import { FarmProfileModal } from '@/components/dairy/FarmProfileModal';
 import { ThemedText } from '@/components/themed-text';
-import { AppCard, AppIcon, IconBubble, LanguageToggleButton, SemanticIconName } from '@/components/ui';
+import { AppCard, AppIcon, IconBubble, LanguageToggleButton, SemanticIconName, useToast } from '@/components/ui';
 import { BorderRadius, Layout, Spacing, Typography } from '@/constants/theme';
 import { useAdmin } from '@/context/admin-context';
 import { useLanguage } from '@/context/language-context';
@@ -26,7 +26,8 @@ export default function MoreScreen() {
   const { t, isUrdu } = useLanguage();
   const { farmName, hasPinSet, isAdmin, lockApp, isPinModalOpen, openPinModal, closePinModal } =
     useAdmin();
-  const { signOut, pendingCount } = useSync();
+  const { signOut, pendingCount, role } = useSync();
+  const toast = useToast();
   const [isProfileOpen, setIsProfileOpen] = useState(false);
 
   const openProfile = useCallback(() => {
@@ -53,6 +54,54 @@ export default function MoreScreen() {
   }, [isUrdu, pendingCount, signOut, t]);
 
   const items: MenuItem[] = [
+    {
+      key: 'collection-portal',
+      icon: 'milk',
+      title: isUrdu ? 'دودھ وصولی' : 'Milk collection',
+      description: isUrdu
+        ? 'ڈیری چنو، لیٹر اور فیٹ لکھو'
+        : 'Pick a dairy and enter liters and fat',
+      onPress: () => router.push('/collection' as never),
+    },
+    {
+      key: 'team-management',
+      icon: 'users',
+      title: isUrdu ? 'دودھی اور ڈیری' : 'Dodhi and dairies',
+      description: isUrdu
+        ? 'دودھی کے اکاؤنٹ، اور جن سے دودھ خریدا جاتا ہے'
+        : 'Accounts for your dodhis and the dairies you buy from',
+      onPress: () => router.push('/more/team' as never),
+    },
+    {
+      key: 'collection-report',
+      icon: 'chart',
+      title: isUrdu ? 'دودھ رپورٹ' : 'Milk report',
+      description: isUrdu
+        ? 'آج، اس ہفتے، اس مہینے — کسی ایک کا یا سب کا'
+        : 'Today, this week, this month — one person or everyone',
+      onPress: () => router.push('/collection/reports' as never),
+    },
+    {
+      key: 'fat-rates',
+      icon: 'chart',
+      title: isUrdu ? 'فیٹ ریٹ' : 'Fat rates',
+      description: isUrdu ? 'فیٹ کی حد اور فی لیٹر ریٹ' : 'Fat bands and the rate per liter',
+      onPress: () => router.push('/collection/fat-rates' as never),
+    },
+    {
+      key: 'assignments',
+      icon: 'users',
+      title: isUrdu ? 'ڈیری تفویض' : 'Assign dairies',
+      description: isUrdu ? 'کس دودھی کو کون سی ڈیری نظر آئے' : 'Choose which dairies each dodhi sees',
+      onPress: () => router.push('/collection/assignments' as never),
+    },
+    {
+      key: 'supplier-pay',
+      icon: 'chart',
+      title: isUrdu ? 'جمعہ کی ادائیگی' : 'Friday payments',
+      description: isUrdu ? 'ہفتہ وار بل اور باقی رقم' : 'Weekly bill and the amount still payable',
+      onPress: () => router.push('/collection/pay' as never),
+    },
     {
       key: 'cloud-sync',
       icon: 'sync',
@@ -90,6 +139,11 @@ export default function MoreScreen() {
     },
   ];
 
+  const visibleItems = items.filter((item) => {
+    if (role !== 'collector' && role !== 'farmer') return true;
+    return ['collection-portal', 'collection-report', 'cloud-sync', 'profile'].includes(item.key);
+  });
+
   return (
     <SafeAreaView edges={['top']} style={[styles.safeArea, { backgroundColor: theme.background }]}>
       <ScrollView
@@ -107,7 +161,7 @@ export default function MoreScreen() {
         </View>
 
         <AppCard variant="default" padding="none" style={styles.menuCard}>
-          {items.map((item, index) => (
+          {visibleItems.map((item, index) => (
             <Pressable
               key={item.key}
               accessibilityRole="button"
@@ -162,7 +216,7 @@ export default function MoreScreen() {
         </Pressable>
       </ScrollView>
 
-      <FarmProfileModal visible={isProfileOpen} onClose={() => setIsProfileOpen(false)} onSaved={() => {}} />
+      <FarmProfileModal visible={isProfileOpen} onClose={() => setIsProfileOpen(false)} onSaved={() => toast.success(isUrdu ? 'فارم پروفائل محفوظ ہو گیا' : 'Farm profile saved')} />
       <AdminPinModal visible={isPinModalOpen} onClose={closePinModal} mode="verify" />
     </SafeAreaView>
   );

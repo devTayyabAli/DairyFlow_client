@@ -3,6 +3,7 @@ import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-nati
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AuthHero } from './AuthHero';
+import { StatusBarCover } from './StatusBarCover';
 import { AppButton, AppIcon } from '@/components/ui';
 import { BorderRadius, Shadows, Spacing } from '@/constants/theme';
 import { useAdmin } from '@/context/admin-context';
@@ -255,6 +256,7 @@ export function LoginScreen({ onSuccess }: LoginScreenProps) {
 
         <Text style={[styles.version, { color: theme.textMuted }]}>DairyFlow · v1.0.0</Text>
       </ScrollView>
+      <StatusBarCover />
     </View>
   );
 }

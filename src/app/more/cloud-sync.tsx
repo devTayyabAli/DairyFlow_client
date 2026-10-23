@@ -13,8 +13,9 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { OfflineStatusBadge } from '@/components/dairy/OfflineStatusBadge';
+import { RejectedChanges } from '@/components/sync/RejectedChanges';
 import { ThemedText } from '@/components/themed-text';
-import { AppButton, AppCard, AppIcon, AppTextInput, IconBubble } from '@/components/ui';
+import { AppButton, AppCard, AppIcon, AppTextInput, IconBubble, useToast } from '@/components/ui';
 import { BorderRadius, Layout, Spacing, Typography } from '@/constants/theme';
 import { useLanguage } from '@/context/language-context';
 import { useTheme } from '@/hooks/use-theme';
@@ -43,6 +44,7 @@ export default function CloudSyncScreen() {
     updateApiUrl,
   } = useSync();
 
+  const toast = useToast();
   const tr = (en: string, ur: string) => (isUrdu ? ur : en);
 
   const [loading, setLoading] = useState(false);
@@ -69,7 +71,7 @@ export default function CloudSyncScreen() {
       await updateApiUrl(customUrlInput);
       setEditingApiUrl(false);
     } catch (err) {
-      Alert.alert(tr('Error', 'خرابی'), err instanceof Error ? err.message : tr('Could not save the address', 'پتہ محفوظ نہیں ہو سکیا'));
+      toast.error(err instanceof Error ? err.message : tr('Could not save the address', 'پتہ محفوظ نہیں ہو سکیا'));
     }
   };
 
@@ -80,17 +82,16 @@ export default function CloudSyncScreen() {
       if (res.status === 'success') {
         const pulled = res.pulledCount ?? 0;
         const pushed = res.appliedCount ?? 0;
-        Alert.alert(
-          tr('Sync complete', 'سنک مکمل'),
-          tr(`${pulled} pulled, ${pushed} pushed.`, `${pulled} تبدیلیاں آئیاں، ${pushed} گیاں۔`)
+        toast.success(
+          tr(`Sync complete: ${pulled} pulled, ${pushed} pushed.`, `سنک مکمل: ${pulled} تبدیلیاں آئیاں، ${pushed} گیاں۔`)
         );
       } else if (res.status === 'skipped') {
-        Alert.alert(tr('Sync skipped', 'سنک نہیں ہو سکیا'), res.message || t('offlineNotice'));
+        toast.info(res.message || t('offlineNotice'));
       } else {
-        Alert.alert(tr('Sync error', 'سنک وچ مسئلہ'), res.message || t('syncFailed'));
+        toast.error(res.message || t('syncFailed'));
       }
     } catch (err) {
-      Alert.alert(tr('Error', 'خرابی'), err instanceof Error ? err.message : t('syncFailed'));
+      toast.error(err instanceof Error ? err.message : t('syncFailed'));
     } finally {
       setLoading(false);
     }
@@ -124,9 +125,11 @@ export default function CloudSyncScreen() {
       const res = await changePassword(currentPasswordInput, newPasswordInput);
       if (res.success) {
         resetChangePasswordForm();
-        Alert.alert(
-          tr('Password updated', 'پاس ورڈ بدل گیا'),
-          tr('Your other devices will be asked to sign in again.', 'ہور فونز تے دوبارہ لاگ ان کرنا پئے گا۔')
+        toast.success(
+          tr(
+            'Password updated. Your other devices will be asked to sign in again.',
+            'پاس ورڈ بدل گیا۔ ہور فونز تے دوبارہ لاگ ان کرنا پئے گا۔'
+          )
         );
       } else if (res.code === 'INVALID_CREDENTIALS') {
         setErrorMessage(tr('Current password is incorrect.', 'موجودہ پاس ورڈ غلط اے۔'));
@@ -134,7 +137,9 @@ export default function CloudSyncScreen() {
         setErrorMessage(res.error || t('syncFailed'));
       }
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : t('networkError'));
+      const msg = err instanceof Error ? err.message : t('networkError');
+      setErrorMessage(msg);
+      toast.error(msg);
     } finally {
       setLoading(false);
     }
@@ -181,6 +186,7 @@ export default function CloudSyncScreen() {
             <ThemedText style={styles.headerTitle}>{t('cloudSyncTitle')}</ThemedText>
           </View>
         </View>
+        <RejectedChanges />
         <View style={styles.content}>
           <AppCard style={styles.card}>
             <View style={styles.cardHeader}>
@@ -240,6 +246,7 @@ export default function CloudSyncScreen() {
           contentContainerStyle={[styles.content, { paddingBottom: Layout.bottomTabInset + 40 }]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled">
+          <RejectedChanges />
           {isSessionExpired && (
             <View style={[styles.banner, { backgroundColor: theme.dangerBg, borderColor: theme.danger + '40' }]}>
               <Ionicons name="alert-circle-outline" size={20} color={theme.danger} />

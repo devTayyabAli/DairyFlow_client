@@ -7,8 +7,10 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   View,
 } from 'react-native';
+import { useSQLiteContext } from 'expo-sqlite';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AdminPinModal } from './AdminPinModal';
@@ -23,7 +25,17 @@ import {
 import { Spacing, Typography } from '@/constants/theme';
 import { useAdmin } from '@/context/admin-context';
 import { useLanguage } from '@/context/language-context';
+import { getAppSetting, setAppSetting } from '@/db/database';
 import { useTheme } from '@/hooks/use-theme';
+import {
+  DEFAULT_REFERENCE_FAT,
+  FAT_PRICING_ENABLED_KEY,
+  FAT_PRICING_REFERENCE_FAT_KEY,
+  FAT_PRICING_SLOPE_KEY,
+  formatRate,
+  parseFatPricing,
+  rateForFat,
+} from '@/utils/fat-pricing';
 
 interface FarmProfileModalProps {
   visible: boolean;
@@ -37,6 +49,7 @@ export function FarmProfileModal({
   onSaved,
 }: FarmProfileModalProps) {
   const theme = useTheme();
+  const db = useSQLiteContext();
   const { isUrdu } = useLanguage();
   const {
     farmName,
@@ -56,6 +69,11 @@ export function FarmProfileModal({
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [isPinSetupModalOpen, setIsPinSetupModalOpen] = useState<boolean>(false);
 
+  // Fat-based pricing: the rate per liter follows the fat percentage
+  const [fatEnabled, setFatEnabled] = useState<boolean>(false);
+  const [refFat, setRefFat] = useState<string>(String(DEFAULT_REFERENCE_FAT));
+  const [fatSlope, setFatSlope] = useState<string>('');
+
   useEffect(() => {
     if (visible) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- re-sync the form with saved profile each time the modal opens
@@ -66,7 +84,40 @@ export function FarmProfileModal({
     }
   }, [visible, farmName, ownerName, ownerPhone, defaultMilkRate]);
 
+  useEffect(() => {
+    if (!visible) return;
+    let active = true;
+    Promise.all([
+      getAppSetting(db, FAT_PRICING_ENABLED_KEY, '0'),
+      getAppSetting(db, FAT_PRICING_REFERENCE_FAT_KEY, String(DEFAULT_REFERENCE_FAT)),
+      getAppSetting(db, FAT_PRICING_SLOPE_KEY, ''),
+    ])
+      .then(([enabled, reference, slope]) => {
+        if (!active) return;
+        setFatEnabled(enabled === '1');
+        setRefFat(reference || String(DEFAULT_REFERENCE_FAT));
+        setFatSlope(slope);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [visible, db]);
+
+  const pricingPreview = parseFatPricing({
+    enabled: fatEnabled ? '1' : '0',
+    baseRate: inputRate,
+    referenceFat: refFat,
+    slope: fatSlope,
+  });
+
+  const handleClose = () => {
+    if (isSubmitting) return;
+    onClose();
+  };
+
   const handleSave = async () => {
+    if (isSubmitting) return;
     if (!inputFarmName.trim()) {
       Alert.alert(
         isUrdu ? 'نام ضروری اے' : 'Required',
@@ -84,6 +135,24 @@ export function FarmProfileModal({
       return;
     }
 
+    if (fatEnabled) {
+      const parsedRef = parseFloat(refFat);
+      if (isNaN(parsedRef) || parsedRef <= 0 || parsedRef > 15) {
+        Alert.alert(
+          isUrdu ? 'فیٹ غلط اے' : 'Invalid Fat %',
+          isUrdu ? 'ریٹ دا فیٹ 0 توں 15 دے وچ لکھو۔' : 'Enter the fat % for this rate (between 0 and 15).'
+        );
+        return;
+      }
+      if (fatSlope.trim() !== '' && !(parseFloat(fatSlope) > 0)) {
+        Alert.alert(
+          isUrdu ? 'فرق غلط اے' : 'Invalid change per 1% fat',
+          isUrdu ? 'فی 1% فیٹ فرق صفر توں ودھ ہووے، یا خالی چھڈ دیو۔' : 'Enter an amount above 0, or leave it empty.'
+        );
+        return;
+      }
+    }
+
     setIsSubmitting(true);
     try {
       await updateFarmProfile({
@@ -92,6 +161,11 @@ export function FarmProfileModal({
         ownerPhone: inputOwnerPhone.trim(),
         defaultMilkRate: inputRate.trim(),
       });
+      await Promise.all([
+        setAppSetting(db, FAT_PRICING_ENABLED_KEY, fatEnabled ? '1' : '0'),
+        setAppSetting(db, FAT_PRICING_REFERENCE_FAT_KEY, refFat.trim() || String(DEFAULT_REFERENCE_FAT)),
+        setAppSetting(db, FAT_PRICING_SLOPE_KEY, fatSlope.trim()),
+      ]);
       onClose();
       if (onSaved) onSaved();
     } catch {
@@ -129,7 +203,7 @@ export function FarmProfileModal({
         visible={visible}
         animationType="slide"
         presentationStyle="pageSheet"
-        onRequestClose={onClose}>
+        onRequestClose={handleClose}>
         <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.background }]}>
           <KeyboardAvoidingView
             style={{ flex: 1 }}
@@ -137,7 +211,8 @@ export function FarmProfileModal({
             {/* Header */}
             <View style={[styles.headerRow, { borderBottomColor: theme.border }]}>
               <Pressable
-                onPress={onClose}
+                onPress={handleClose}
+                disabled={isSubmitting}
                 accessibilityRole="button"
                 accessibilityLabel="Close"
                 hitSlop={12}
@@ -238,6 +313,70 @@ export function FarmProfileModal({
                     ? 'جدوں وی تسی یا ملازم نیا دودھ درج کرو گے، ایہ ریٹ خود بخود لگ جاوے گا۔'
                     : 'This rate will automatically pre-fill on every new milk entry.'}
                 </ThemedText>
+
+                {/* Fat-based pricing */}
+                <View style={[styles.fatSwitchRow, { borderColor: theme.border, backgroundColor: theme.card }]}>
+                  <View style={styles.fatSwitchText}>
+                    <ThemedText style={styles.fatSwitchTitle}>
+                      {isUrdu ? 'ریٹ فیٹ دے مطابق بدلے' : 'Rate changes with fat'}
+                    </ThemedText>
+                    <ThemedText style={[styles.helpCaption, { color: theme.textSecondary }]}>
+                      {isUrdu
+                        ? 'فیٹ ودھے تے ریٹ ودھے گا، فیٹ گھٹے تے ریٹ گھٹے گا۔'
+                        : 'Higher fat gives a higher rate, lower fat a lower rate.'}
+                    </ThemedText>
+                  </View>
+                  <Switch
+                    value={fatEnabled}
+                    onValueChange={setFatEnabled}
+                    accessibilityLabel={isUrdu ? 'ریٹ فیٹ دے مطابق بدلے' : 'Rate changes with fat'}
+                    trackColor={{ true: theme.primary, false: theme.border }}
+                  />
+                </View>
+
+                {fatEnabled ? (
+                  <View style={styles.fatFields}>
+                    <AppTextInput
+                      label={isUrdu ? 'اوپر دتا ریٹ کس فیٹ تے اے' : 'Rate above is for this fat %'}
+                      value={refFat}
+                      onChangeText={setRefFat}
+                      placeholder={String(DEFAULT_REFERENCE_FAT)}
+                      keyboardType="decimal-pad"
+                      unitSuffix="%"
+                    />
+                    <AppTextInput
+                      label={isUrdu ? 'ہر 1% فیٹ تے ریٹ دا فرق (اختیاری)' : 'Rate change per 1% fat (optional)'}
+                      value={fatSlope}
+                      onChangeText={setFatSlope}
+                      placeholder={isUrdu ? 'خالی = فیٹ دے تناسب نال' : 'Empty = in proportion to fat'}
+                      keyboardType="decimal-pad"
+                      unitSuffix={isUrdu ? 'روپے' : 'Rs'}
+                      helperText={
+                        isUrdu
+                          ? 'خالی چھڈو تے ریٹ فیٹ دے تناسب نال بدلے گا (مثلاً 180 ریٹ 6 فیٹ تے = ہر فیٹ 30 روپے)۔'
+                          : 'Leave empty and the rate follows fat proportionally (e.g. 180 at 6% = Rs 30 per fat point).'
+                      }
+                    />
+
+                    <View style={[styles.previewBox, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}>
+                      <ThemedText style={[styles.previewTitle, { color: theme.textSecondary }]}>
+                        {isUrdu ? 'مثال' : 'Example'}
+                      </ThemedText>
+                      {[4, 5, 6, 7].map((f) => (
+                        <View key={f} style={styles.previewRow}>
+                          <ThemedText style={styles.previewLabel}>
+                            {isUrdu ? `فیٹ ${f}%` : `Fat ${f}%`}
+                          </ThemedText>
+                          <ThemedText style={styles.previewValue}>
+                            {isUrdu
+                              ? `Rs ${formatRate(rateForFat(pricingPreview, f))} / لیٹر`
+                              : `Rs ${formatRate(rateForFat(pricingPreview, f))} / L`}
+                          </ThemedText>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                ) : null}
               </View>
 
               {/* Form Section 3: Admin PIN Security */}
@@ -324,6 +463,7 @@ export function FarmProfileModal({
                         : 'Save Farm Settings'
                   }
                   loading={isSubmitting}
+                  disabled={isSubmitting}
                   icon={<AppIcon name="check" size={18} color="#FFFFFF" />}
                   onPress={handleSave}
                 />
@@ -332,7 +472,8 @@ export function FarmProfileModal({
                   variant="ghost"
                   size="md"
                   title={isUrdu ? 'منسوخ کرو' : 'Cancel'}
-                  onPress={onClose}
+                  onPress={handleClose}
+                  disabled={isSubmitting}
                   style={styles.cancelGhostBtn}
                 />
 
@@ -386,6 +527,23 @@ export function FarmProfileModal({
 }
 
 const styles = StyleSheet.create({
+  fatSwitchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    marginTop: Spacing.sm,
+    padding: Spacing.md,
+    borderWidth: 1,
+    borderRadius: 14,
+  },
+  fatSwitchText: { flex: 1, gap: 2 },
+  fatSwitchTitle: { fontSize: Typography.body.fontSize, fontWeight: '700' },
+  fatFields: { gap: Spacing.md, marginTop: Spacing.sm },
+  previewBox: { borderWidth: 1, borderRadius: 12, padding: Spacing.md, gap: 6 },
+  previewTitle: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.6 },
+  previewRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  previewLabel: { fontSize: 14 },
+  previewValue: { fontSize: 14, fontWeight: '700' },
   safeArea: {
     flex: 1,
   },

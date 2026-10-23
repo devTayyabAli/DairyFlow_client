@@ -13,9 +13,12 @@ import { ThemedView } from './themed-view';
 
 import { Spacing } from '@/constants/theme';
 import { useLanguage } from '@/context/language-context';
+import { useSync } from '@/sync';
 
 export default function AppTabs() {
   const { t } = useLanguage();
+  const { role } = useSync();
+  const procurementOnly = role === 'collector' || role === 'farmer';
 
   return (
     <Tabs>
@@ -25,15 +28,21 @@ export default function AppTabs() {
           <TabTrigger name="home" href="/" asChild>
             <TabButton>{t('tabHome')}</TabButton>
           </TabTrigger>
-          <TabTrigger name="explore" href="/explore" asChild>
-            <TabButton>{t('tabMilk')}</TabButton>
-          </TabTrigger>
-          <TabTrigger name="buyers" href="/buyers" asChild>
-            <TabButton>{t('tabBuyers')}</TabButton>
-          </TabTrigger>
+          {!procurementOnly && (
+            <TabTrigger name="explore" href="/explore" asChild>
+              <TabButton>{t('tabMilk')}</TabButton>
+            </TabTrigger>
+          )}
+          {!procurementOnly && (
+            <TabTrigger name="buyers" href="/buyers" asChild>
+              <TabButton>{t('tabBuyers')}</TabButton>
+            </TabTrigger>
+          )}
+          {/* Herd / Livestock (Maweshi) commented out for now - will be re-enabled in the future
           <TabTrigger name="livestock" href="/livestock" asChild>
             <TabButton>{t('tabHerd')}</TabButton>
           </TabTrigger>
+          */}
           <TabTrigger name="more" href={'/more' as never} asChild>
             <TabButton>{t('tabMore')}</TabButton>
           </TabTrigger>

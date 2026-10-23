@@ -8,7 +8,11 @@ import {
   resolveBuyerId,
   resolveBuyerUuid,
   resolveAnimalUuid,
+  resolveSupplierId,
+  resolveSupplierUuid,
+  SYNCED_SETTING_KEYS,
 } from '@/db/database';
+import { parkSyncRejection, reconcileSupplierBalance } from '@/db/procurement';
 import { describeError, fetchWithTimeout, isNetworkError } from './network-errors';
 import { getApiEndpoint } from './sync-config';
 import {
@@ -214,6 +218,15 @@ export async function syncNow(db: SQLiteDatabase): Promise<SyncResult> {
           const first = pushData.rejected[0];
           rejectedSample = `${first.table}: ${first.reason}`;
           console.warn('[Sync] Server rejected changes:', pushData.rejected);
+          for (const rejected of pushData.rejected) {
+            const change = clientChanges.find((item) => item.table === rejected.table && item.uuid === rejected.uuid);
+            await parkSyncRejection(db, {
+              table: rejected.table,
+              uuid: rejected.uuid,
+              op: change?.op ?? 'upsert',
+              reason: rejected.reason,
+            });
+          }
         }
 
         // Clear exactly the queue IDs that were pushed (newly queued rows survive)
@@ -260,10 +273,13 @@ export async function syncNow(db: SQLiteDatabase): Promise<SyncResult> {
         totalPulled += changes.length;
       }
 
+      const previousCursor = currentCursor;
       await setSyncCursor(db, pullData.cursor);
       await setLastSyncedAt(db, new Date().toISOString());
 
-      hasMore = pullData.hasMore === true && changes.length > 0;
+      // A dodhi or dairy may receive an empty page when those rows belong to someone else.
+      // Keep walking while the cursor moves, otherwise their own later rows never arrive.
+      hasMore = pullData.hasMore === true && (changes.length > 0 || pullData.cursor !== previousCursor);
     }
 
     return {
@@ -513,6 +529,293 @@ async function loadWirePayload(
       };
     }
 
+    case 'suppliers': {
+      const row = await db.getFirstAsync<{
+        name: string;
+        phone: string | null;
+        village: string | null;
+        rate_type: string;
+        flat_rate: number | null;
+        base_fat: number | null;
+        rate_per_fat_point: number | null;
+        balance: number;
+        status: string;
+        linked_farm_id: string | null;
+        created_at: string;
+        updated_at: string | null;
+      }>(
+        'SELECT name, phone, village, rate_type, flat_rate, base_fat, rate_per_fat_point, balance, status, linked_farm_id, created_at, updated_at FROM suppliers WHERE uuid = ? LIMIT 1;',
+        [uuid]
+      );
+      if (!row) return null;
+      return {
+        table,
+        uuid,
+        op: 'upsert',
+        data: {
+          name: row.name,
+          phone: row.phone,
+          village: row.village,
+          rate_type: row.rate_type,
+          flat_rate: row.flat_rate,
+          base_fat: row.base_fat,
+          rate_per_fat_point: row.rate_per_fat_point,
+          balance: row.balance,
+          status: row.status,
+          linked_farm_id: row.linked_farm_id,
+          created_at: row.created_at,
+        },
+        clientUpdatedAt: toIsoTimestamp(row.updated_at || row.created_at, now),
+      };
+    }
+
+    case 'milk_collections': {
+      const row = await db.getFirstAsync<{
+        date: string;
+        shift: string;
+        supplier_id: number;
+        supplier_name: string;
+        liters: number;
+        fat_percentage: number;
+        rate_per_liter: number;
+        total_amount: number;
+        collector_id: string | null;
+        collector_name: string | null;
+        pricing_band_uuid: string | null;
+        collected_at: string | null;
+        notes: string | null;
+        created_at: string;
+        updated_at: string | null;
+      }>(
+        'SELECT date, shift, supplier_id, supplier_name, liters, fat_percentage, rate_per_liter, total_amount, collector_id, collector_name, pricing_band_uuid, collected_at, notes, created_at, updated_at FROM milk_collections WHERE uuid = ? LIMIT 1;',
+        [uuid]
+      );
+      if (!row) return null;
+      const supplierUuid = await resolveSupplierUuid(db, row.supplier_id);
+      if (!supplierUuid) return DEFER;
+
+      return {
+        table,
+        uuid,
+        op: 'upsert',
+        data: {
+          date: row.date,
+          shift: row.shift,
+          supplier_uuid: supplierUuid,
+          supplier_name: row.supplier_name,
+          collector_id: row.collector_id,
+          collector_name: row.collector_name,
+          liters: row.liters,
+          fat_percentage: row.fat_percentage,
+          rate_per_liter: row.rate_per_liter,
+          total_amount: row.total_amount,
+          pricing_band_uuid: row.pricing_band_uuid,
+          collected_at: row.collected_at,
+          notes: row.notes,
+          created_at: row.created_at,
+        },
+        clientUpdatedAt: toIsoTimestamp(row.updated_at || row.created_at, now),
+      };
+    }
+
+    case 'advances': {
+      const row = await db.getFirstAsync<{
+        target_type: 'buyer' | 'supplier';
+        target_id: number;
+        target_name: string;
+        amount: number;
+        remaining_balance: number;
+        repayment_terms: string;
+        deduction_per_settlement: number;
+        status: string;
+        date: string;
+        notes: string | null;
+        created_at: string;
+        updated_at: string | null;
+      }>(
+        'SELECT target_type, target_id, target_name, amount, remaining_balance, repayment_terms, deduction_per_settlement, status, date, notes, created_at, updated_at FROM advances WHERE uuid = ? LIMIT 1;',
+        [uuid]
+      );
+      if (!row) return null;
+      const targetUuid = await resolveTargetUuid(db, row.target_type, row.target_id);
+      if (!targetUuid) return DEFER;
+
+      return {
+        table,
+        uuid,
+        op: 'upsert',
+        data: {
+          target_type: row.target_type,
+          target_uuid: targetUuid,
+          target_name: row.target_name,
+          amount: row.amount,
+          remaining_balance: row.remaining_balance,
+          repayment_terms: row.repayment_terms,
+          deduction_per_settlement: row.deduction_per_settlement,
+          status: row.status,
+          date: row.date,
+          notes: row.notes,
+          created_at: row.created_at,
+        },
+        clientUpdatedAt: toIsoTimestamp(row.updated_at || row.created_at, now),
+      };
+    }
+
+    case 'settlements': {
+      const row = await db.getFirstAsync<{
+        target_type: 'buyer' | 'supplier';
+        target_id: number;
+        target_name: string;
+        period_start: string;
+        period_end: string;
+        gross_amount: number;
+        advance_deduction: number;
+        net_amount: number;
+        status: string;
+        expected_payment_date: string;
+        actual_payment_date: string | null;
+        payment_method: string | null;
+        notes: string | null;
+        created_at: string;
+        updated_at: string | null;
+      }>(
+        'SELECT target_type, target_id, target_name, period_start, period_end, gross_amount, advance_deduction, net_amount, status, expected_payment_date, actual_payment_date, payment_method, notes, created_at, updated_at FROM settlements WHERE uuid = ? LIMIT 1;',
+        [uuid]
+      );
+      if (!row) return null;
+      const targetUuid = await resolveTargetUuid(db, row.target_type, row.target_id);
+      if (!targetUuid) return DEFER;
+
+      return {
+        table,
+        uuid,
+        op: 'upsert',
+        data: {
+          target_type: row.target_type,
+          target_uuid: targetUuid,
+          target_name: row.target_name,
+          period_start: row.period_start,
+          period_end: row.period_end,
+          gross_amount: row.gross_amount,
+          advance_deduction: row.advance_deduction,
+          net_amount: row.net_amount,
+          status: row.status,
+          expected_payment_date: row.expected_payment_date,
+          actual_payment_date: row.actual_payment_date,
+          payment_method: row.payment_method || 'Cash',
+          notes: row.notes,
+          created_at: row.created_at,
+        },
+        clientUpdatedAt: toIsoTimestamp(row.updated_at || row.created_at, now),
+      };
+    }
+
+    case 'ledger_entries': {
+      const row = await db.getFirstAsync<{
+        account_type: 'buyer' | 'supplier';
+        account_id: number;
+        account_name: string;
+        entry_type: string;
+        amount: number;
+        reference_id: string | null;
+        date: string;
+        notes: string | null;
+        payment_method: string | null;
+        payment_reference: string | null;
+        created_at: string;
+        updated_at: string | null;
+      }>(
+        'SELECT account_type, account_id, account_name, entry_type, amount, reference_id, date, notes, payment_method, payment_reference, created_at, updated_at FROM ledger_entries WHERE uuid = ? LIMIT 1;',
+        [uuid]
+      );
+      if (!row) return null;
+      const accountUuid = await resolveTargetUuid(db, row.account_type, row.account_id);
+      if (!accountUuid) return DEFER;
+
+      return {
+        table,
+        uuid,
+        op: 'upsert',
+        data: {
+          account_type: row.account_type,
+          account_uuid: accountUuid,
+          account_name: row.account_name,
+          entry_type: row.entry_type,
+          amount: row.amount,
+          reference_id: row.reference_id,
+          date: row.date,
+          notes: row.notes,
+          payment_method: row.payment_method,
+          payment_reference: row.payment_reference,
+          created_at: row.created_at,
+        },
+        clientUpdatedAt: toIsoTimestamp(row.updated_at || row.created_at, now),
+      };
+    }
+
+    case 'fat_rate_bands': {
+      const row = await db.getFirstAsync<{
+        min_fat: number;
+        max_fat: number;
+        rate_per_liter: number;
+        effective_from: string;
+        effective_to: string | null;
+        active: number;
+        label: string | null;
+        created_at: string;
+        updated_at: string | null;
+      }>(
+        `SELECT min_fat, max_fat, rate_per_liter, effective_from, effective_to, active, label, created_at, updated_at
+         FROM fat_rate_bands WHERE uuid = ? LIMIT 1;`,
+        [uuid]
+      );
+      if (!row) return null;
+      return {
+        table,
+        uuid,
+        op: 'upsert',
+        data: {
+          min_fat: row.min_fat,
+          max_fat: row.max_fat,
+          rate_per_liter: row.rate_per_liter,
+          effective_from: row.effective_from,
+          effective_to: row.effective_to,
+          active: row.active,
+          label: row.label,
+          created_at: row.created_at,
+        },
+        clientUpdatedAt: toIsoTimestamp(row.updated_at || row.created_at, now),
+      };
+    }
+
+    case 'collector_assignments': {
+      const row = await db.getFirstAsync<{
+        collector_user_id: string;
+        supplier_id: number;
+        active: number;
+        created_at: string;
+        updated_at: string | null;
+      }>(
+        `SELECT collector_user_id, supplier_id, active, created_at, updated_at FROM collector_assignments WHERE uuid = ? LIMIT 1;`,
+        [uuid]
+      );
+      if (!row) return null;
+      const supplierUuid = await resolveSupplierUuid(db, row.supplier_id);
+      if (!supplierUuid) return DEFER;
+      return {
+        table,
+        uuid,
+        op: 'upsert',
+        data: {
+          collector_user_id: row.collector_user_id,
+          supplier_uuid: supplierUuid,
+          active: row.active,
+          created_at: row.created_at,
+        },
+        clientUpdatedAt: toIsoTimestamp(row.updated_at || row.created_at, now),
+      };
+    }
+
     case 'settings': {
       const row = await db.getFirstAsync<{ value: string }>(
         'SELECT value FROM app_settings WHERE key = ? LIMIT 1;',
@@ -542,15 +845,21 @@ async function applyRemoteChangesToDatabase(
   changes: ServerSyncChange[]
 ): Promise<void> {
   // Sort changes in FK dependency order:
-  // 1. buyers, 2. livestock, 3. milk_entries, 4. buyer_payments, 5. livestock_activities, 6. expenses, 7. settings
   const tablePriority: Record<string, number> = {
     buyers: 1,
+    suppliers: 1,
+    fat_rate_bands: 1,
+    collector_assignments: 2,
     livestock: 2,
     milk_entries: 3,
+    milk_collections: 3,
     buyer_payments: 4,
-    livestock_activities: 5,
-    expenses: 6,
-    settings: 7,
+    advances: 4,
+    settlements: 5,
+    ledger_entries: 6,
+    livestock_activities: 7,
+    expenses: 8,
+    settings: 9,
   };
 
   const sortedChanges = [...changes].sort((a, b) => {
@@ -606,6 +915,44 @@ async function resolveOrCreateBuyerId(
     [buyerName, now, now]
   );
   return created.lastInsertRowId;
+}
+
+async function resolveOrCreateSupplierId(
+  db: SQLiteDatabase,
+  supplierUuid: string,
+  supplierName: string
+): Promise<number> {
+  const existing = await resolveSupplierId(db, supplierUuid);
+  if (existing) return existing;
+
+  const now = new Date().toISOString();
+  const res = await db.runAsync(
+    `INSERT INTO suppliers (name, rate_type, balance, status, created_at, uuid, updated_at)
+     VALUES (?, 'fat_based', 0, 'active', ?, ?, datetime('now'));`,
+    [supplierName, now, supplierUuid]
+  );
+  return res.lastInsertRowId;
+}
+
+async function resolveTargetUuid(
+  db: SQLiteDatabase,
+  targetType: 'buyer' | 'supplier',
+  targetId: number
+): Promise<string | null> {
+  return targetType === 'buyer'
+    ? await resolveBuyerUuid(db, targetId)
+    : await resolveSupplierUuid(db, targetId);
+}
+
+async function resolveOrCreateTargetId(
+  db: SQLiteDatabase,
+  targetType: 'buyer' | 'supplier',
+  targetUuid: string,
+  targetName: string
+): Promise<number> {
+  return targetType === 'buyer'
+    ? await resolveOrCreateBuyerId(db, targetUuid, targetName)
+    : await resolveOrCreateSupplierId(db, targetUuid, targetName);
 }
 
 /**
@@ -936,9 +1283,365 @@ async function applySingleChange(db: SQLiteDatabase, change: ServerSyncChange): 
     return;
   }
 
+  if (table === 'suppliers') {
+    if (op === 'delete') {
+      try {
+        await db.runAsync('DELETE FROM suppliers WHERE uuid = ?;', [uuid]);
+      } catch (err) {
+        console.warn(`[Sync] Cannot delete supplier ${uuid}:`, err);
+      }
+    } else if (data) {
+      const existing = await db.getFirstAsync<{ id: number }>('SELECT id FROM suppliers WHERE uuid = ? LIMIT 1;', [uuid]);
+      if (existing) {
+        await db.runAsync(
+          `UPDATE suppliers SET
+             name = ?, phone = ?, village = ?, rate_type = ?, flat_rate = ?, base_fat = ?, rate_per_fat_point = ?, balance = ?, status = ?, linked_farm_id = ?, updated_at = datetime('now')
+           WHERE uuid = ?;`,
+          [
+            data.name as string,
+            (data.phone as string) || null,
+            (data.village as string) || null,
+            (data.rate_type as string) || 'fat_based',
+            data.flat_rate !== undefined && data.flat_rate !== null ? Number(data.flat_rate) : null,
+            data.base_fat !== undefined && data.base_fat !== null ? Number(data.base_fat) : 6.0,
+            data.rate_per_fat_point !== undefined && data.rate_per_fat_point !== null ? Number(data.rate_per_fat_point) : 35.0,
+            Number(data.balance ?? 0),
+            (data.status as string) || 'active',
+            (data.linked_farm_id as string) || null,
+            uuid,
+          ]
+        );
+      } else {
+        await db.runAsync(
+          `INSERT INTO suppliers (name, phone, village, rate_type, flat_rate, base_fat, rate_per_fat_point, balance, status, linked_farm_id, created_at, uuid, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'));`,
+          [
+            data.name as string,
+            (data.phone as string) || null,
+            (data.village as string) || null,
+            (data.rate_type as string) || 'fat_based',
+            data.flat_rate !== undefined && data.flat_rate !== null ? Number(data.flat_rate) : null,
+            data.base_fat !== undefined && data.base_fat !== null ? Number(data.base_fat) : 6.0,
+            data.rate_per_fat_point !== undefined && data.rate_per_fat_point !== null ? Number(data.rate_per_fat_point) : 35.0,
+            Number(data.balance ?? 0),
+            (data.status as string) || 'active',
+            (data.linked_farm_id as string) || null,
+            (data.created_at as string) || now,
+            uuid,
+          ]
+        );
+      }
+    }
+    return;
+  }
+
+  if (table === 'milk_collections') {
+    if (op === 'delete') {
+      await db.runAsync('DELETE FROM milk_collections WHERE uuid = ?;', [uuid]);
+    } else if (data) {
+      const localSupplierId = await resolveOrCreateSupplierId(
+        db,
+        data.supplier_uuid as string,
+        (data.supplier_name as string) || 'Supplier'
+      );
+      const existing = await db.getFirstAsync<{ id: number }>(
+        'SELECT id FROM milk_collections WHERE uuid = ? LIMIT 1;',
+        [uuid]
+      );
+      if (existing) {
+        await db.runAsync(
+          `UPDATE milk_collections SET
+             date = ?, shift = ?, supplier_id = ?, supplier_name = ?, liters = ?, fat_percentage = ?, rate_per_liter = ?, total_amount = ?, collector_id = ?, collector_name = ?, pricing_band_uuid = ?, collected_at = ?, notes = ?, updated_at = datetime('now')
+           WHERE uuid = ?;`,
+          [
+            data.date as string,
+            data.shift as string,
+            localSupplierId,
+            (data.supplier_name as string) || 'Supplier',
+            Number(data.liters),
+            Number(data.fat_percentage),
+            Number(data.rate_per_liter),
+            Number(data.total_amount),
+            (data.collector_id as string) || null,
+            (data.collector_name as string) || null,
+            (data.pricing_band_uuid as string) || null,
+            (data.collected_at as string) || null,
+            (data.notes as string) || null,
+            uuid,
+          ]
+        );
+        await reconcileSupplierBalance(db, localSupplierId);
+      } else {
+        await db.runAsync(
+          `INSERT INTO milk_collections (date, shift, supplier_id, supplier_name, liters, fat_percentage, rate_per_liter, total_amount, collector_id, collector_name, pricing_band_uuid, collected_at, notes, created_at, uuid, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'));`,
+          [
+            data.date as string,
+            data.shift as string,
+            localSupplierId,
+            (data.supplier_name as string) || 'Supplier',
+            Number(data.liters),
+            Number(data.fat_percentage),
+            Number(data.rate_per_liter),
+            Number(data.total_amount),
+            (data.collector_id as string) || null,
+            (data.collector_name as string) || null,
+            (data.pricing_band_uuid as string) || null,
+            (data.collected_at as string) || null,
+            (data.notes as string) || null,
+            (data.created_at as string) || now,
+            uuid,
+          ]
+        );
+        await reconcileSupplierBalance(db, localSupplierId);
+      }
+    }
+    return;
+  }
+
+  if (table === 'advances') {
+    if (op === 'delete') {
+      await db.runAsync('DELETE FROM advances WHERE uuid = ?;', [uuid]);
+    } else if (data) {
+      const targetType = data.target_type as 'buyer' | 'supplier';
+      const localTargetId = await resolveOrCreateTargetId(
+        db,
+        targetType,
+        data.target_uuid as string,
+        (data.target_name as string) || 'Target'
+      );
+      const existing = await db.getFirstAsync<{ id: number }>(
+        'SELECT id FROM advances WHERE uuid = ? LIMIT 1;',
+        [uuid]
+      );
+      if (existing) {
+        await db.runAsync(
+          `UPDATE advances SET
+             target_type = ?, target_id = ?, target_name = ?, amount = ?, remaining_balance = ?, repayment_terms = ?, deduction_per_settlement = ?, status = ?, date = ?, notes = ?, updated_at = datetime('now')
+           WHERE uuid = ?;`,
+          [
+            targetType,
+            localTargetId,
+            (data.target_name as string) || 'Target',
+            Number(data.amount),
+            Number(data.remaining_balance),
+            (data.repayment_terms as string) || 'weekly_cut',
+            Number(data.deduction_per_settlement ?? 0),
+            (data.status as string) || 'active',
+            data.date as string,
+            (data.notes as string) || null,
+            uuid,
+          ]
+        );
+      } else {
+        await db.runAsync(
+          `INSERT INTO advances (target_type, target_id, target_name, amount, remaining_balance, repayment_terms, deduction_per_settlement, status, date, notes, created_at, uuid, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'));`,
+          [
+            targetType,
+            localTargetId,
+            (data.target_name as string) || 'Target',
+            Number(data.amount),
+            Number(data.remaining_balance),
+            (data.repayment_terms as string) || 'weekly_cut',
+            Number(data.deduction_per_settlement ?? 0),
+            (data.status as string) || 'active',
+            data.date as string,
+            (data.notes as string) || null,
+            (data.created_at as string) || now,
+            uuid,
+          ]
+        );
+      }
+    }
+    return;
+  }
+
+  if (table === 'settlements') {
+    if (op === 'delete') {
+      await db.runAsync('DELETE FROM settlements WHERE uuid = ?;', [uuid]);
+    } else if (data) {
+      const targetType = data.target_type as 'buyer' | 'supplier';
+      const localTargetId = await resolveOrCreateTargetId(
+        db,
+        targetType,
+        data.target_uuid as string,
+        (data.target_name as string) || 'Target'
+      );
+      const existing = await db.getFirstAsync<{ id: number }>(
+        'SELECT id FROM settlements WHERE uuid = ? LIMIT 1;',
+        [uuid]
+      );
+      if (existing) {
+        await db.runAsync(
+          `UPDATE settlements SET
+             target_type = ?, target_id = ?, target_name = ?, period_start = ?, period_end = ?, gross_amount = ?, advance_deduction = ?, net_amount = ?, status = ?, expected_payment_date = ?, actual_payment_date = ?, payment_method = ?, notes = ?, updated_at = datetime('now')
+           WHERE uuid = ?;`,
+          [
+            targetType,
+            localTargetId,
+            (data.target_name as string) || 'Target',
+            data.period_start as string,
+            data.period_end as string,
+            Number(data.gross_amount),
+            Number(data.advance_deduction ?? 0),
+            Number(data.net_amount),
+            (data.status as string) || 'due',
+            data.expected_payment_date as string,
+            (data.actual_payment_date as string) || null,
+            (data.payment_method as string) || 'Cash',
+            (data.notes as string) || null,
+            uuid,
+          ]
+        );
+      } else {
+        await db.runAsync(
+          `INSERT INTO settlements (target_type, target_id, target_name, period_start, period_end, gross_amount, advance_deduction, net_amount, status, expected_payment_date, actual_payment_date, payment_method, notes, created_at, uuid, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'));`,
+          [
+            targetType,
+            localTargetId,
+            (data.target_name as string) || 'Target',
+            data.period_start as string,
+            data.period_end as string,
+            Number(data.gross_amount),
+            Number(data.advance_deduction ?? 0),
+            Number(data.net_amount),
+            (data.status as string) || 'due',
+            data.expected_payment_date as string,
+            (data.actual_payment_date as string) || null,
+            (data.payment_method as string) || 'Cash',
+            (data.notes as string) || null,
+            (data.created_at as string) || now,
+            uuid,
+          ]
+        );
+      }
+    }
+    return;
+  }
+
+  if (table === 'ledger_entries') {
+    if (op === 'delete') {
+      // PRD Mandate: Ledger entries are immutable and must NEVER be deleted.
+      console.warn(`[Sync] Refusing to delete immutable ledger entry ${uuid}`);
+      return;
+    }
+    if (data) {
+      const accountType = data.account_type as 'buyer' | 'supplier';
+      const localAccountId = await resolveOrCreateTargetId(
+        db,
+        accountType,
+        data.account_uuid as string,
+        (data.account_name as string) || 'Account'
+      );
+      const existing = await db.getFirstAsync<{ id: number }>(
+        'SELECT id FROM ledger_entries WHERE uuid = ? LIMIT 1;',
+        [uuid]
+      );
+      if (existing) {
+        await db.runAsync(
+          `UPDATE ledger_entries SET
+             account_type = ?, account_id = ?, account_name = ?, entry_type = ?, amount = ?, reference_id = ?, date = ?, notes = ?, payment_method = ?, payment_reference = ?, updated_at = datetime('now')
+           WHERE uuid = ?;`,
+          [
+            accountType,
+            localAccountId,
+            (data.account_name as string) || 'Account',
+            data.entry_type as string,
+            Number(data.amount),
+            (data.reference_id as string) || null,
+            data.date as string,
+            (data.notes as string) || null,
+            (data.payment_method as string) || null,
+            (data.payment_reference as string) || null,
+            uuid,
+          ]
+        );
+      } else {
+        await db.runAsync(
+          `INSERT INTO ledger_entries (account_type, account_id, account_name, entry_type, amount, reference_id, date, notes, payment_method, payment_reference, created_at, uuid, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'));`,
+          [
+            accountType,
+            localAccountId,
+            (data.account_name as string) || 'Account',
+            data.entry_type as string,
+            Number(data.amount),
+            (data.reference_id as string) || null,
+            data.date as string,
+            (data.notes as string) || null,
+            (data.payment_method as string) || null,
+            (data.payment_reference as string) || null,
+            (data.created_at as string) || now,
+            uuid,
+          ]
+        );
+      }
+      if (accountType === 'supplier') await reconcileSupplierBalance(db, localAccountId);
+    }
+    return;
+  }
+
+  if (table === 'fat_rate_bands' && data && op !== 'delete') {
+    const existing = await db.getFirstAsync<{ id: number }>(
+      'SELECT id FROM fat_rate_bands WHERE uuid = ? LIMIT 1;',
+      [uuid]
+    );
+    const values = [
+      Number(data.min_fat),
+      Number(data.max_fat),
+      Number(data.rate_per_liter),
+      data.effective_from as string,
+      (data.effective_to as string) || null,
+      Number(data.active ?? 1),
+      (data.label as string) || null,
+    ];
+    if (existing) {
+      await db.runAsync(
+        `UPDATE fat_rate_bands SET min_fat = ?, max_fat = ?, rate_per_liter = ?, effective_from = ?, effective_to = ?, active = ?, label = ?, updated_at = datetime('now') WHERE uuid = ?;`,
+        [...values, uuid]
+      );
+    } else {
+      await db.runAsync(
+        `INSERT INTO fat_rate_bands (min_fat, max_fat, rate_per_liter, effective_from, effective_to, active, label, created_at, uuid, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'));`,
+        [...values, (data.created_at as string) || now, uuid]
+      );
+    }
+    return;
+  }
+
+  if (table === 'collector_assignments' && data && op !== 'delete') {
+    const supplierId = await resolveSupplierId(db, data.supplier_uuid as string);
+    if (!supplierId) return;
+    const existing = await db.getFirstAsync<{ id: number }>(
+      'SELECT id FROM collector_assignments WHERE uuid = ? LIMIT 1;',
+      [uuid]
+    );
+    if (existing) {
+      await db.runAsync(
+        `UPDATE collector_assignments SET collector_user_id = ?, supplier_id = ?, active = ?, updated_at = datetime('now') WHERE uuid = ?;`,
+        [data.collector_user_id as string, supplierId, Number(data.active ?? 1), uuid]
+      );
+    } else {
+      await db.runAsync(
+        `INSERT INTO collector_assignments (collector_user_id, supplier_id, active, created_at, uuid, updated_at)
+         VALUES (?, ?, ?, ?, ?, datetime('now'));`,
+        [
+          data.collector_user_id as string,
+          supplierId,
+          Number(data.active ?? 1),
+          (data.created_at as string) || now,
+          uuid,
+        ]
+      );
+    }
+    return;
+  }
+
   if (table === 'settings') {
-    const allowed = ['farm_name', 'admin_name', 'admin_phone', 'default_milk_rate'];
-    if (allowed.includes(uuid) && data && typeof data.value === 'string') {
+    if ((SYNCED_SETTING_KEYS as readonly string[]).includes(uuid) && data && typeof data.value === 'string') {
       await db.runAsync(
         'INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?);',
         [uuid, data.value]
